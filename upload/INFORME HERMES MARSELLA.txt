@@ -1,0 +1,1458 @@
+====================================================================================================
+                        INFORME DE INGENIERÍA INVERSA Y ANÁLISIS INTEGRAL
+                              SOFTWARE: SG HERMES (VERSIÓN 9.2.1.1)
+====================================================================================================
+DOCUMENTO TÉCNICO: INFORME HERMES MARSELLA
+FECHA DE ANÁLISIS: 30 de Septiembre de 2026
+CLIENTE / EMPRESA: MARSELLA S.A.S. / JOHAN MARSELLA
+EJECUTABLE ANALIZADO: C:\Program Files (x86)\Julio Chaves\Hermes\SgHermes.exe
+BASE DE DATOS: MySQL (Esquema: marsellasas)
+AUTOR / VENDOR ORIGINAL: Julio Chaves
+OBJETIVO: Levantamiento de requerimientos, auditoría técnica, desensamblado de componentes,
+          catálogo exhaustivo de funcionalidades y plan estratégico para modernización y mejora.
+====================================================================================================
+
+TABLA DE CONTENIDO:
+1. FICHA TÉCNICA Y RESUMEN EJECUTIVO
+2. ARQUITECTURA TECNOLÓGICA Y DEPENDENCIAS
+3. ESTRUCTURA GENERAL DE COMPONENTES DEL BINARIO (914 TIPOS, 408 FORMULARIOS, 109 REPORTES)
+4. MAPA COMPLETO DE MENÚS Y NAVEGACIÓN PRINCIPAL
+5. DESCRIPCIÓN DETALLADA DE TODOS LOS MÓDULOS FUNCIONALES
+   5.1. Módulo de Seguridad, Usuarios y Control de Accesos
+   5.2. Módulo de Parámetros Generales, Catálogos y Maestros
+   5.3. Módulo de Facturación y Ventas (POS, Estándar y Electrónica DIAN)
+   5.4. Módulo de Compras, Proveedores y Documento Soporte
+   5.5. Módulo DIAN Radian y Eventos de Recepción
+   5.6. Módulo de Inventarios, Multibodega, Lotes, Seriales y Logística
+   5.7. Módulo de Costos y Órdenes de Producción (Transformación)
+   5.8. Módulo de Tesorería, Cajas POS, Bancos y Conciliación
+   5.9. Módulo de Cartera (Cuentas por Cobrar CXC y Cuentas por Pagar CXP)
+   5.10. Módulo de Créditos, Préstamos y Financiación
+   5.11. Módulo de Nómina y Nómina Electrónica DIAN
+   5.12. Módulo de Contabilidad General, Causación Automática y NIIF / IFRS
+   5.13. Módulo de Presupuesto Público y Empresarial (CDP, CRP, Modificaciones)
+   5.14. Módulo Vertical: Restaurantes, Bares y Cafeterías (Mesas y Comandas)
+   5.15. Módulo Vertical: Hotelería y Gestión de Alojamiento (Habitaciones)
+   5.16. Módulo Vertical: Industria Cafetera (Compra de Café y Prueba de Taza)
+   5.17. Módulo Vertical: Facturación en Bloque y Servicios Públicos (Lecturas)
+   5.18. Módulo Vertical: Taller y Servicio Técnico de Equipos
+   5.19. Módulo Vertical: Vehículos y Mascotas
+   5.20. Módulo de Interoperabilidad e Importaciones Masivas desde Excel
+6. CATÁLOGO COMPLETO DE LOS 408 FORMULARIOS (.NET WINFORMS)
+7. CATÁLOGO COMPLETO DE LOS 109 REPORTES (SAP CRYSTAL REPORTS)
+8. ANÁLISIS DEL MODELO DE BASE DE DATOS (130 TABLAS MYSQL)
+9. DIAGNÓSTICO DE INGENIERÍA INVERSA: VULNERABILIDADES Y DEUDA TÉCNICA
+10. PLAN ESTRATÉGICO Y RECOMENDACIONES PARA EL NUEVO SOFTWARE MEJORADO
+
+====================================================================================================
+1. FICHA TÉCNICA Y RESUMEN EJECUTIVO
+====================================================================================================
+El sistema analizado es "SG Hermes" (también denominado comercialmente "Hermes - Software de Gestión
+Administrativo y Contable"), versión 9.2.1.1 (con compilación de fecha 30 de julio de 2024),
+desarrollado originalmente por Julio Chaves.
+
+Se trata de un ERP monolítico de escritorio diseñado para el mercado colombiano, altamente robusto
+en amplitud de funciones, que abarca desde la contabilidad bajo norma local y NIIF, nómina y facturación
+electrónica regulada por la DIAN, hasta submódulos de nicho especializados como trilladoras/compra
+de café con análisis físico y sensorial (catación en taza), facturación de acueductos y servicios públicos
+por toma de lecturas, administración hotelera y puntos de venta táctiles con mapa de mesas para restaurantes.
+
+Ficha Técnica:
+- Nombre del Producto: SG Hermes / Hermes
+- Versión Binaria: 9.2.1.1 (Assembly Hermes, Version=9.2.1.1, Culture=neutral, PublicKeyToken=null)
+- Tamaño del Ejecutable: 37,760,512 bytes (~37.7 MB)
+- Lenguaje / Plataforma: Microsoft .NET Framework 4.5 WinForms (Compilado en Visual Basic .NET)
+- Arquitectura de Procesador: x86 (32 bits compatible con Windows de 64 bits)
+- Motor de Base de Datos: MySQL Server (Puerto 3306)
+- Controlador de Conexión: MySQL ODBC 5.1 Driver mediante ADODB COM Interop
+- Ubicación de Instalación: C:\Program Files (x86)\Julio Chaves\Hermes\
+- Archivo de Configuración de BD: C:\Program Files (x86)\Julio Chaves\Hermes\servidor.txt
+  (Parámetros detectados: IP 192.168.1.99; Usuario: root; BD: marsellasas; Driver: MySQL ODBC 5.1)
+
+====================================================================================================
+2. ARQUITECTURA TECNOLÓGICA Y DEPENDENCIAS
+====================================================================================================
+El software se compone del ejecutable principal y una serie de bibliotecas satélite que permiten
+su funcionamiento:
+
+1. Capa de Presentación e Interfaz de Usuario:
+   - Windows Forms (.NET 4.5).
+   - Componentes heredados de Shockwave Flash (Flash.ocx, FlashControlV71.dll, ShockwaveFlashObjects.dll)
+     usados históricamente para animaciones, gráficos interactivos o mapas visuales de mesas.
+   - Íconos y recursos embebidos en el propio ensamblado.
+
+2. Capa de Reportes e Impresión:
+   - CrystalDecisions.ReportAppServer.Prompting.dll y runtime de SAP Crystal Reports para Visual Studio.
+   - Impresión directa a puertos de impresora térmica POS (impresoras de comanda, tirillas fiscales).
+   - Dispositivos de impresión configurables por formulario y terminal (ParaLugImpre1, EmpImpTike).
+
+3. Capa de Integración DIAN y Servicios Web:
+   - Newtonsoft.Json.dll: Serialización y deserialización de estructuras JSON para comunicación
+     con API REST de proveedores tecnológicos y validación DIAN.
+   - QRCoder.dll: Motor de renderizado vectorial y matricial de códigos QR para la impresión en facturas
+     con el CUFE (Código Único de Facturación Electrónica), CUNE (Nómina) y URLs oficiales de la DIAN.
+   - System.Net.Http.dll: Envío sincrónico y asincrónico HTTP/HTTPS a endpoints SOAP de la DIAN:
+     * SendBillSync (Facturación Electrónica)
+     * GetStatus (Consulta de estado del documento en la DIAN)
+     * SendNominaSync (Nómina Electrónica)
+     * SendEventUpdateStatus (Eventos Radian / Título Valor)
+
+4. Capa de Infraestructura y Comunicaciones:
+   - Renci.SshNet.dll: Cliente SSH/SFTP para realizar transferencias remotas y copias de seguridad seguras.
+   - log4net.dll: Registro de eventos de auditoría y trazas de error del sistema.
+   - Google Mail / SMTP: Rutinas de autenticación para despacho de correos electrónicos con anexos (PDF + XML).
+
+5. Capa de Datos (Data Access):
+   - Módulo Hermes.Bconexion: Inicializa conexiones mediante ConnectionString ODBC ("DRIVER={MySQL ODBC 5.1 Driver};
+     SERVER=...; DATABASE=...; UID=...; PWD=...;").
+   - Utiliza objetos ADODB.Connection y ADODB.Recordset directos.
+   - Sentencias SQL dinámicas construidas mediante concatenación de cadenas en los módulos Botones,
+     BotGuarMa, Boteliminar, BotActualiza y Vardos.
+
+====================================================================================================
+3. ESTRUCTURA GENERAL DE COMPONENTES DEL BINARIO
+====================================================================================================
+La inspección por reflexión del ensamblado arrojó un total de 914 tipos definidos:
+
+- 408 Clases Formulario (.NET Form): Corresponden a cada una de las pantallas de captura, consultas,
+  parámetros, ventanas de búsqueda rápida (prefijo 'Bus*') y consolas de reportes (prefijo 'RepFr*').
+- 109 Clases ReportClass: Reportes compilados de Crystal Reports que cubren balances, auxiliares,
+  colillas de nómina, órdenes de servicio, facturas CUFE, tirillas y liquidación de café.
+- 130 Tablas MySQL en producción: Esquema relacional con tablas operativas, maestros, tablas auxiliares
+  de temporales y tablas de auditoría.
+- Módulos de Procesamiento Transaccional Global:
+  * Hermes.Botones: Orquestador que vincula la botonera estándar de la barra de herramientas
+    (Nuevo, Guardar, Modificar, Eliminar, Imprimir, Anular) con cada uno de los 45 tipos de documentos.
+  * Hermes.BotGuarMa: Lógica de persistencia e inserción en base de datos de catálogos y maestros.
+  * Hermes.Boteliminar: Lógica de anulación reversa, borrado lógico y liberación de saldos contables,
+    de inventario y de cartera.
+  * Hermes.BotActualiza: Refresco dinámico de combos y listas tras mutaciones de datos.
+  * Hermes.Varuno y Hermes.Vardos: Conjuntos de funciones de cálculo matemático, redondeos,
+    validación de vigencias, resolución de listas de precios, cálculo de retenciones, amortizaciones y CUFE.
+  * Hermes.McxccpMov: Gestión centralizada del saldo de cartera (CXC / CXP).
+  * Hermes.MovOtros: Verificación de stock, trazabilidad de despachos, control de kits y parámetros de sistema.
+
+====================================================================================================
+4. MAPA COMPLETO DE MENÚS Y NAVEGACIÓN PRINCIPAL
+====================================================================================================
+La navegación del sistema se encuentra estructurada en el formulario central 'Menu' a través de las
+siguientes ramas de opciones:
+
+[MENÚ 1: &SESIÓN]
+  ├── Copias de seguridad (Generación y restauración de backups físicos/lógicos de MySQL)
+  ├── Cambio de clave (Actualización de contraseña del usuario activo)
+  ├── Bloqueo de sistema (Bloqueo de terminal por inactividad sin cerrar sesión)
+  ├── Usuarios (Gestión de usuarios y asignación granular de privilegios)
+  └── Salir (Cierre controlado de la aplicación)
+
+[MENÚ 2: &PARÁMETROS]
+  ├── Empresa (Datos societarios, NIT, razón social, régimen tributario, logo, representante legal)
+  ├── Catálogos:
+  │   ├── Productos (Catálogo maestro de inventario)
+  │   ├── Servicios (Servicios prestados no inventariables)
+  │   ├── Terceros (Clientes, proveedores, empleados, entidades financieras)
+  │   ├── Cuentas contables (Estructura PUC)
+  │   ├── Formas de pago (Efectivo, crédito, transferencias, consignaciones, bonos)
+  │   ├── Impuestos (Tarifas de IVA, Impoconsumo, Retefuente, ReteICA, ReteIVA)
+  │   ├── Mesas y Mapa de Mesas (Distribución de salones para restaurante/bar)
+  │   ├── Conceptos para utilizar en compras, ingresos y egresos
+  │   ├── Ciudades y Departamentos (Codificación DANE)
+  │   ├── Cargos empleados (Definición de puestos de trabajo)
+  │   └── Centros de costo (Estructura para distribución de gastos e ingresos)
+  ├── Facturación en bloque:
+  │   ├── Usuarios de facturación (Padrón de clientes de cobro recurrente)
+  │   ├── Bloques de Facturación (Zonificación de facturación masiva)
+  │   ├── Catálogo de Estratos (Estratos 1 al 6 para tarifas diferenciales)
+  │   ├── Catálogo de Usos (Residencial, comercial, industrial, oficial)
+  │   └── Otros parámetros
+  ├── Clasificación Inventario (Jerarquización en 6 niveles: Línea 1 a Línea 6)
+  ├── Precios - Listas de precio:
+  │   ├── Catálogo de listas (Múltiples listas: mayorista, detal, distribuidor, etc.)
+  │   └── Actualizar precios (Actualizaciones porcentuales o lineales masivas)
+  ├── Saldos Iniciales (Carga inicial de inventario, cartera y contabilidad)
+  ├── Preparación de Comprobantes (Definición de consecuenciales de documentos)
+  ├── Catálogo de Cajas POS (Configuración de terminales de punto de venta)
+  ├── Nómina - Configuración:
+  │   ├── Grupos de Nómina (Administrativa, operativa, ventas, etc.)
+  │   ├── Conceptos de Nómina (Devengos, deducciones, parafiscales, prestaciones)
+  │   └── Cuentas contables y fórmulas (Mapeo contable de nómina)
+  ├── Presupuesto:
+  │   ├── Preparar años (Vigencias presupuestales)
+  │   └── Cuentas de presupuesto (Rubros presupuestales de ingresos y gastos)
+  └── Generalidades:
+      ├── Parámetros generales (Comportamiento del sistema, decimales, redondeos)
+      ├── Parámetros de contabilidad (Configuración de cuentas de cierre y ajustes)
+      ├── Facturación electrónica (Credenciales de conexión DIAN, certificados, token)
+      └── Configurar lugares de impresión (Puertos e impresoras por tipo de documento)
+
+[MENÚ 3: &MOVIMIENTOS]
+  ├── Caja y Bancos:
+  │   ├── Recibos de Caja / Comprobante de Ingreso (Recaudo de cartera y otros ingresos)
+  │   ├── Comprobante de Egreso (Pagos a proveedores y gastos varios)
+  │   ├── Arqueo de Caja (Cierre diario de caja POS por cajero)
+  │   ├── Recibo de Caja Menor (Manejo de caja menor y reembolsos)
+  │   ├── Consignación bancaria (Depósitos a cuentas bancarias de la empresa)
+  │   ├── Depósito y/o retiro de caja y bancos (Transferencias interbancarias)
+  │   ├── Conciliación bancaria (Cruce entre extractos y movimientos registrados)
+  │   └── Cuenta de cobro (Generación y radicación de cuentas de cobro)
+  ├── Ventas:
+  │   ├── Factura de venta estándar (Formato carta / media carta con CUFE)
+  │   ├── Factura de venta POS (Formato tirilla para terminal de mostrador)
+  │   ├── Cotización (Propuestas comerciales a clientes)
+  │   ├── Pedidos (Órdenes de pedido de clientes)
+  │   ├── Remisión (Entregas de mercancía pendientes de facturar)
+  │   ├── Nota Débito CXC (Recargos o intereses a clientes)
+  │   ├── Nota Crédito CXC (Devoluciones en ventas o anulaciones con CUDE)
+  │   ├── Facturación Servicios Mensuales (Facturas de cobro recurrente)
+  │   ├── Facturación (Operación general de facturación)
+  │   ├── Generar facturación en bloque (Emisión masiva para empresas de servicios)
+  │   ├── Toma de lectura individual (Registro de lectura de contadores/medidores)
+  │   ├── Comandas - Habitaciones (Consumos cargados a habitaciones de hotel)
+  │   ├── Pedidos Mesas (Toma de pedidos en mesas de restaurante)
+  │   ├── Asignar comandas a empleados (Control de atención por mesero)
+  │   ├── Registro de comanda física (Digitalización de comandas manuales)
+  │   └── Habitaciones (Panel de ocupación y control de hotel)
+  ├── Servicio Técnico:
+  │   ├── Orden de servicio (Ingreso de equipos, accesorios y diagnóstico inicial)
+  │   └── Servicio técnico realizado (Cierre de orden, repuestos, mano de obra)
+  ├── Financiación:
+  │   ├── Factor de financiación (Tasas de interés, cuotas y factores)
+  │   ├── Solicitud de crédito (Recepción de documentos y referencias del cliente)
+  │   ├── Aprobación de solicitud de crédito (Estudio y asignación de cupo)
+  │   └── Financiación (Generación del pagaré y tabla de amortización de cuotas)
+  ├── Movimientos - Café:
+  │   ├── Compra de Café (Liquidación por peso bruto, tara, pasilla, rendimiento)
+  │   ├── Control de calidad (Análisis físico de la almendra)
+  │   └── Informe control de calidad (Prueba de taza / perfil sensorial de catación)
+  ├── Compras:
+  │   ├── Compra (Causación de facturas de compra de mercancías y materias primas)
+  │   ├── Orden de Compra (Requerimientos a proveedores)
+  │   ├── Nota Débito CXP (Devolución en compras a proveedores)
+  │   ├── Nota Crédito CXP (Ajustes a favor concedidos por el proveedor)
+  │   └── Eventos de recepción (Acuse de recibo de factura electrónica DIAN / Radian)
+  ├── Inventarios:
+  │   ├── Nota de salida de productos (Bajas por deterioro, consumo interno)
+  │   ├── Nota de entrada de productos (Entradas varias no provenientes de compra)
+  │   ├── Nota de costos de producción (Costeo de procesos de manufactura)
+  │   └── Nota de producción (Transformación de materias primas a producto terminado)
+  ├── Bodegas:
+  │   ├── Nota de ajuste de bodegas (Corrección de inventarios)
+  │   ├── Nota de traslado de bodegas (Movimiento físico entre almacenes)
+  │   ├── Solicitud de traslado (Pedido interno de reabastecimiento de bodega)
+  │   ├── Guía de despacho (Documento de transporte y entrega de mercancía)
+  │   ├── Lista de empaque (Detalle de bultos/cajas en despachos)
+  │   ├── Recepción de mercancías (Control de descargue en muelle)
+  │   ├── Ajuste de subinventario (Control individual de seriales y lotes)
+  │   └── Conteo físico (Toma física de inventario para comparación)
+  ├── Nómina:
+  │   ├── Nómina de empleados anterior (Histórico)
+  │   ├── Nómina de empleados causación (Liquidación quincenal o mensual)
+  │   ├── Soporte de pago nómina electrónica (Generación individual de soporte)
+  │   ├── Generar soporte de pago en bloque (Procesamiento masivo)
+  │   └── Enviar nómina electrónica en bloque (Transmisión a la DIAN)
+  ├── Nota de Contabilidad (Asientos contables manuales y reclasificaciones)
+  └── Presupuesto:
+      ├── Apropiación inicial (Presupuesto aprobado de ingresos y gastos)
+      ├── Certificado de Disponibilidad Presupuestal - CDP
+      ├── Compromiso Presupuestal - CRP
+      ├── Nota de ajuste presupuestal (Adiciones, traslados y reducciones)
+      ├── Obligación presupuestal
+      └── Egreso presupuestal (Giro financiero)
+
+[MENÚ 4: P&ROCESOS]
+  ├── Cierres por periodo (Cierre mensual de inventarios y contabilidad)
+  ├── Eliminar documentos (Anulación controlada y reversión de transacciones)
+  ├── Documentos electrónicos:
+  │   ├── Consulta general de documentos electrónicos (Monitor de estados DIAN)
+  │   └── Consultar documentos electrónicos (Detalle de XML, CUFE y respuesta DIAN)
+  ├── Actualizar saldo de inventario (Recálculo masivo de stock en base a movimientos)
+  ├── Numeración no utilizada (Gestión de huecos en numeración de resoluciones DIAN)
+  ├── Depreciación automática (Cálculo periódico de depreciación de activos fijos)
+  ├── Unificar terceros (Fusión de registros de terceros duplicados)
+  ├── Trasladar cuentas y terceros (Reasignación de saldos contables)
+  ├── Asignar códigos para créditos (Control de referencias crediticias)
+  ├── Procesos adicionales
+  └── Informes especiales
+
+[MENÚ 5: &INFORMES]
+  ├── Informe de comprobantes (Listado cronológico de documentos)
+  ├── Informe de caja (Flujo de efectivo diario y cierres)
+  ├── Informe de ventas (Ventas por período, por cliente, por vendedor, utilidad)
+  │   └── Resumen de ventas por productos (Ventas agrupadas por ítem y línea)
+  ├── Informe de servicio técnico (Órdenes ejecutadas, repuestos facturados)
+  ├── Informe de compras (Detalle de compras por proveedor y por producto)
+  ├── Cuentas por cobrar (Edades de cartera, estados de cuenta, cartera por cobrar)
+  ├── Cuentas por pagar (Compromisos pendientes con proveedores)
+  ├── Contabilidad (Balance de prueba, Mayor y Balances, Libros auxiliares)
+  ├── Fiscales (Informes de IVA, Retefuente, ReteICA, medios magnéticos DIAN)
+  ├── Inventario (Kardex valorizado, existencias por bodega, rotación de productos)
+  ├── Documentos anulados (Auditoría de cancelaciones y motivos)
+  ├── Pedidos de mesas eliminados (Auditoría contra fraudes en restaurante)
+  ├── Listado de terceros (Directorios, cupos de crédito, contratos de empleados)
+  └── Presupuesto:
+      ├── Programación de Ingresos
+      ├── Programación de Gastos
+      ├── Ejecución de Gastos
+      ├── Libro auxiliar de presupuesto
+      └── Disponibilidades y compromisos pendientes
+
+[BARRA DE HERRAMIENTAS Y ACCIONES DISPONIBLES EN CADA VENTANA]
+- Nuevo (Cmdnue): Habilita el formulario para capturar un nuevo registro.
+- Guardar (Cmdgra): Valida datos, genera el consecutivo y persiste la transacción.
+- Modificar (Cmdedit): Permite editar registros existentes si no están cerrados o transmitidos.
+- Eliminar / Anular (Cmdeli): Anula el documento y registra el motivo formal en tabla de auditoría.
+- Imprimir (Cmdimp): Envía el formato a la impresora configurada (láser, térmica o pantalla).
+- Deshacer / Cancelar (Cmdcan): Restaura el estado anterior sin guardar cambios.
+- Navegación de registros: Primero (Cmdpri), Anterior (Cmdant), Siguiente (Cmdsig), Último (Cmdult).
+- Búsqueda (Cmdbus) y Buscar en la lista (BtBusLis1): Motores de filtrado rápido.
+- Operaciones complementarias:
+  * Adicionar Tercero rápido (Botadicli / MnuAcAdt)
+  * Causación Contable en línea (Botcau / mnucausas): Muestra el asiento contable en tiempo real.
+  * Traer / Copiar desde (Bottrae / Mnutradesd): Convierte una cotización a pedido, un pedido a remisión,
+    o una remisión a factura de venta de manera automática.
+  * Adjuntar archivos digitales (CmdAdjun): Asocia PDFs, imágenes o escaneos al documento.
+  * Traer desde Excel (CmdExpExel): Carga masiva de ítems a la grilla desde una hoja de cálculo.
+  * Generar evento de recepción (MnuEvenRcp2): Dispara el acuse de recibo ante la DIAN.
+
+====================================================================================================
+5. DESCRIPCIÓN DETALLADA DE TODOS LOS MÓDULOS FUNCIONALES
+====================================================================================================
+
+5.1. MÓDULO DE SEGURIDAD, USUARIOS Y CONTROL DE ACCESOS
+- Formularios: Usuarios, UsuaPerm, UsuPermesas, CambioCla, BloqSistema, Frmlogin.
+- Tablas: usuarios, usuapermiso, permisoscab, permisosfac, permisosusu.
+- Funcionalidades:
+  * Creación y administración de perfiles de usuario con contraseña cifrada/ofuscada.
+  * Matriz de permisos detallada campo a campo: por cada formulario del sistema se define si el usuario
+    puede consultar, crear, modificar, borrar, imprimir, ver costos de compra o conceder descuentos.
+  * Asignación de bodegas y cajas POS permitidas por cada usuario para evitar operaciones cruzadas.
+  * Bloqueo de terminal por tiempo de inactividad para proteger estaciones en puntos de venta abiertos.
+  * Permisos restringidos para restaurante: apertura de mesa, cambio de mesero, anulación de ítems
+    de comanda ya enviados a cocina.
+
+5.2. MÓDULO DE PARÁMETROS GENERALES, CATÁLOGOS Y MAESTROS
+- Formularios: Empresa, Terceros, TerceNue, CamTerce, Productos, ProduNue, Servicios, CuentasPuc,
+  FormaPago, DetIvas, CenCosto, Ciudades, Deptos, Zonas1, Cargos, LineaInv1, NivelInv1, ListaPre,
+  PreciosXpro, ParaGen, ParaConGen, ParaLugImpre1, EmpImpTike.
+- Tablas: empresas, terceros, productos, servicios, cuentaspuc, formapago, detimpuestos, retenciones,
+  cecostos, ciudades, regiones, zonas, cargosemp, linea1 a linea6, listapre, preciosxpro, parametros.
+- Funcionalidades:
+  * Terceros: Gestión completa de clientes, proveedores, transportadores, contratistas y empleados.
+    Almacena tipo de documento (CC, NIT, CE, Pasaporte), dígito de verificación automático,
+    responsabilidades fiscales para DIAN (Gran contribuyente, Autorretenedor, Régimen simple, etc.),
+    direcciones, teléfonos, e-mails de facturación electrónica (tercecorreo) y datos de EPS/pensiones.
+  * Productos: Clasificación jerárquica en 6 niveles. Soporta referencia interna, nombre comercial,
+    múltiples códigos de barra (prodcodbars), unidades de medida (undmedidas, produndmeds: kilos, gramos,
+    libras, metros, cajas, unidades, etc.), tarifas de IVA e Impoconsumo, stock mínimo y máximo,
+    manejo de producto inventariable o no inventariable, costo estándar, último costo y costo promedio.
+  * Manejo de Kits / Ensamble (FrModKits1, FrVerKits1): Agrupación de varios ítems para venta conjunta
+    con descuento automático de inventario de sus componentes.
+  * Listas de Precios: Múltiples listas con fijación por margen de rentabilidad sobre el costo o por
+    precios fijos. Actualización automática masiva (ModPreAuto) por porcentaje de incremento general.
+  * PUC Contable: Catálogo de cuentas con definición de naturaleza (Débito/Crédito), nivel de agrupación,
+    si exige tercero, si exige centro de costo o base de retención.
+
+5.3. MÓDULO DE FACTURACIÓN Y VENTAS (POS, ESTÁNDAR Y ELECTRÓNICA DIAN)
+- Formularios: Facventas, FacvenPos, Cotizacion, Pedidos, Remision, NotcreCLI, NotdebCLI, Busfacven,
+  BusfacvenPen, BusHisVencli1, Transfacven, DctGen, FrModPreven, FrModDirecli, FrModBorite,
+  DocElenvio1, DocElReenv2, FacElConsul1, FacEleInform1, ResDian.
+- Tablas: facventas, detfventas, detfvensub, auxdetforpag, notascxccxp, resdian, respdocfele.
+- Reportes: ImpDocFCN7, ImpDocFCN8, ImpDocFVECU1, RepCoVenta5, RepFacVenCT4, RepVenProd1, RepVenResu2.
+- Funcionalidades:
+  * Facturación Estándar: Venta a crédito o contado, captura de cliente, vendedor, lista de precios,
+    plazo de pago, cálculo de múltiples impuestos (IVA 0%, 5%, 19%, Impoconsumo 8%, retenciones automáticas).
+  * Facturación POS (Punto de Venta): Interfaz optimizada para teclado numérico y lector de código de barras.
+    Cobro rápido en efectivo con cálculo de cambio/vueltas, múltiples medios de pago combinados
+    (efectivo + tarjeta + bono).
+  * Conversión de Documentos: Importación fluida de Cotizaciones a Pedidos, Pedidos a Remisiones,
+    y Remisiones a Factura con control de saldos pendientes para evitar doble facturación.
+  * Facturación Electrónica DIAN:
+    - Generación de archivo XML conforme al estándar UBL 2.1 exigido por la DIAN en Colombia.
+    - Firma digital y cálculo del algoritmo CUFE (Código Único de Facturación Electrónica - SHA-384).
+    - Generación del código QR mediante QRCoder.dll e inserción en la representación gráfica (PDF).
+    - Envío sincrónico mediante protocolo SOAP/REST a la DIAN o a través del proveedor tecnológico configurado.
+    - Almacenamiento del TrackId, estado de validación y mensajes de aceptación o rechazo.
+    - Módulo de reenvío para facturas que hayan quedado en contingencia o con fallas de red.
+    - Despacho automático de correo electrónico al adquiriente adjuntando el contenedor electrónico (ZIP con PDF y XML).
+  * Notas Crédito y Débito Electrónicas: Generación con referencia obligatoria a la factura afectada y CUDE.
+
+5.4. MÓDULO DE COMPRAS, PROVEEDORES Y DOCUMENTO SOPORTE
+- Formularios: Compras, Ordencom, NotaDebCom, NotcrePRO, Buscompras, Busordenc, ExelCompra.
+- Tablas: compras, detcompras, ordencompras, detordencom, notascxccxp.
+- Reportes: RepCoCompra, RepAuxComVen.
+- Funcionalidades:
+  * Órdenes de Compra: Solicitud formal de abastecimiento con control de precios pactados y fechas de entrega.
+  * Causación de Facturas de Compra: Entrada de inventario inmediata con actualización del costo promedio
+    y último costo de compra. Desglose de impuestos descontables y cálculo automático de retenciones
+    practicadas (Retefuente, ReteIVA, ReteICA).
+  * Documento Soporte Electrónico: Emisión de documento soporte en adquisiciones efectuadas a sujetos no
+    obligados a expedir factura de venta, transmitido electrónicamente a la DIAN (Support_doc).
+  * Devoluciones en Compra (Notas Débito a Proveedor): Descuenta automáticamente las existencias de inventario
+    y reduce el saldo de la cuenta por pagar al proveedor.
+
+5.5. MÓDULO DIAN RADIAN Y EVENTOS DE RECEPCIÓN
+- Formularios: ComEvenrece1, ComEvenBloq1, MnuEvenRcp1, MnuEvenRcp2.
+- Tablas: comevenrecep.
+- Clases: Reception_Event, Even_Recep, Sendeventupdatestatusresponse.
+- Funcionalidades:
+  * Recepción de facturas electrónicas de proveedores para habilitación como título valor y deducción de costos.
+  * Generación y transmisión de los 4 eventos obligatorios ante la plataforma RADIAN de la DIAN:
+    1. Evento 030: Acuse de recibo de la Factura Electrónica de Venta.
+    2. Evento 032: Recibo del bien o prestación del servicio.
+    3. Evento 033: Aceptación expresa de la factura.
+    4. Evento 031: Reclamo / Rechazo de la factura de venta (desacuerdo comercial).
+  * Procesamiento individual o masivo en bloque de eventos para optimizar tiempos del departamento contable.
+
+5.6. MÓDULO DE INVENTARIOS, MULTIBODEGA, LOTES, SERIALES Y LOGÍSTICA
+- Formularios: Entradas, Salidas, Bodegas, SelCosBod, TraslaBod1, SolTrasla, SolTrasl2, NotaAjuBod,
+  ConteoInv, ConteoTrae, Despacho, ListEmpaque, RecepMerca2, AjuSubInve, BusEntSal, BusEntraSal2,
+  BusAjuBod1, BusContInv, BusDespa, BusRecemer, BusSalSerial, ExelStocBod.
+- Tablas: bodegas, entsalida, detentsalida, traslados, dettraslado, ajustes, detajustes, conteoinv,
+  detconteoinv, despachos, detdespachos, listempaques, detlistempaq, recepmerca, detrecepmerca,
+  subinventa, auxkardex, ubiprodbod.
+- Reportes: ImpKardex2, ImpKardBode, RepInventa2, RepInventa4, RepInventa6, RepInvRenta, RepDifestoc,
+  ImpAjuBod1, ImpTraslaBod1, ImpDspacho, ImpListEmpq, ImpRecMerca.
+- Funcionalidades:
+  * Multibodega: Administración de múltiples ubicaciones físicas (Bodega Principal, Puntos de Venta,
+    Almacén de Averías, Bodega de Tránsito). Existencias y costos independientes por bodega.
+  * Traslados entre Bodegas: Flujo de solicitud, aprobación, despacho físico y confirmación de recepción.
+  * Subinventarios (Lotes y Seriales): Trazabilidad de números de serie para garantías (computadores,
+    maquinaria, electrodomésticos) y control de números de lote con fecha de vencimiento para alimentos y medicamentos.
+  * Tomas Físicas de Inventario (ConteoInv): Captura de conteo a ciegas mediante terminales o listados,
+    cruce contra stock teórico del sistema y generación automática de notas de ajuste por sobrantes o faltantes.
+  * Logística y Despacho: Emisión de Guías de Despacho y Listas de Empaque para transporte de carga,
+    con control de bultos, peso y transportador asignado.
+  * Kardex Valorizado: Trazabilidad cronológica completa entrada-salida-saldo, valorizado a costo
+    promedio ponderado.
+
+5.7. MÓDULO DE COSTOS Y ÓRDENES DE PRODUCCIÓN (TRANSFORMACIÓN)
+- Formularios: Notaprod, Notacostos, BusNotaprod.
+- Tablas: subproduct, prodcamposad.
+- Reportes: RepNotaProd1.
+- Funcionalidades:
+  * Diseñado para pequeñas y medianas industrias manufactureras o preparación de alimentos.
+  * Definición de recetas / listas de materiales (BOM - Bill of Materials).
+  * Órdenes de producción: descarga las materias primas del inventario al momento de iniciar la orden
+    y carga el producto terminado disponible para venta al finalizar la orden.
+  * Asignación de costos indirectos de fabricación (CIF) y mano de obra a la orden de producción
+    para obtener el costo unitario real del producto terminado.
+
+5.8. MÓDULO DE TESORERÍA, CAJAS POS, BANCOS Y CONCILIACIÓN
+- Formularios: Compingreso, Compegreso, ArqCaja, ComCajMen, ConsBanco, RetBanco, ConciBan, CajasPOS,
+  SelCaja, BusIngEgr, CueDetCaj, CueDetCMen.
+- Tablas: comprobantes, detcuentas, cajas, cajaarqueo, detcajarq, bancos, bancosemp, consbancab, consbandet.
+- Reportes: ImpArqCaja, ImpConsBan, ImpEgrIng3, RepMovCajBan, RepMovCajMen, RepFluCaj.
+- Funcionalidades:
+  * Recibos de Caja (Comprobante de Ingreso): Registro de ingresos operativos y no operativos, afectación
+    inmediata de cuentas por cobrar y bancos.
+  * Comprobantes de Egreso: Registro de pagos a proveedores, anticipos, nómina y gastos generales.
+    Impresión de formato de cheque y voucher de pago.
+  * Arqueo y Cuadre de Caja POS: Resumen por turno de ventas en efectivo, vouchers de tarjetas,
+    créditos, gastos de caja y sobrantes/faltantes frente al dinero físico entregado por el cajero.
+  * Caja Menor: Control de fondos fijos de caja menor, legalización de gastos menudos y reembolso de caja.
+  * Bancos y Conciliación: Registro de extractos bancarios mensuales y conciliación automática/manual
+    marcando partidas conciliadas y detectando cheques girados no cobrados o notas bancarias no contabilizadas.
+
+5.9. MÓDULO DE CARTERA (CUENTAS POR COBRAR CXC Y CUENTAS POR PAGAR CXP)
+- Formularios: MovCxcP, CueDetCxcP, CueDet2CxcP, CueMenCxcp, BusPagCXCP, Bussal3CXCP, ParInfcxcp.
+- Tablas: notascxccxp, detnotcxccxp, auxrepcart.
+- Reportes: RepCartera, RepCartera2, RepCXC, RepCarCXc2, RepCXCAb2, RepCXCMov, RepCXCNue1, RepCXCRes.
+- Funcionalidades:
+  * Control de vencimientos de facturas de clientes y facturas de proveedores.
+  * Reportes de antigüedad de saldos (Cartera corriente, 1 a 30 días, 31 a 60 días, 61 a 90 días, más de 90 días).
+  * Asignación de cupos máximos de crédito y días de gracia por cliente, con bloqueo automático
+    de facturación a clientes con cartera morosa.
+  * Estados de cuenta para envío por e-mail a clientes con historial de facturas, abonos y saldo pendiente.
+
+5.10. MÓDULO DE CRÉDITOS, PRÉSTAMOS Y FINANCIACIÓN
+- Formularios: SolCreditos, SolCredApro, Financiacion, PagFina, FactorFin, Maspagos, Maspagcuot2,
+  TerCredcla, Bussolcre.
+- Tablas: solcreditos, solcreapro, financiacion, detfinancia, factorfin, facaprocre.
+- Reportes: ImpFinancia.
+- Funcionalidades:
+  * Radicación de solicitudes de crédito con datos laborales, ingresos, fiadores y referencias comerciales.
+  * Estudio de crédito y flujo de aprobación por niveles de autorización.
+  * Liquidación de créditos bajo sistema de cuotas fijas o variables, con desglose de capital,
+    intereses corrientes, seguro e intereses de mora.
+  * Emisión e impresión de pagarés, libranzas y tablas de amortización.
+  * Módulo de recaudo masivo de cuotas en ventanilla.
+
+5.11. MÓDULO DE NÓMINA Y NÓMINA ELECTRÓNICA DIAN
+- Formularios: NominaN1, NominaCau2, NomEmple3, NomPorEmp, NomPorEm3, ParaNomAdm, ParaNomiCon3,
+  ParaNomiCuen3, ParaNomiSum3, TerceNomi1, TerceNomi2, Cargos, NomiLotsop, NomiElenvio, BusNomiEl1.
+- Tablas: nominas, detnomina, detnomiele, nomiconcep, nomiconcuf, nomiconempl, nomisumcab, nomisumdet,
+  cargosemp, contratoemp, retftenomina.
+- Reportes: ImpNomina2, ImpNomina3, RepNomEmp2, RepNomEmp3.
+- Clases: Nomina_Elec, Sendnominasyncresponse, Sendnominasyncresult.
+- Funcionalidades:
+  * Administración del personal: tipo de contrato (término fijo, indefinido, obra o labor, aprendizaje),
+    salario básico, subsidio de transporte, afiliaciones a EPS, Fondos de Pensiones, ARL y Caja de Compensación.
+  * Novedades de Nómina: Incapacidades generales y laborales, licencias de maternidad/paternidad,
+    vacaciones, permisos remunerados y no remunerados, horas extras diurnas, nocturnas, festivas y dominicales.
+  * Liquidación Periódica: Cálculo neto a pagar, retención en la fuente por salarios (Procedimiento 1 y 2),
+    descuentos de seguridad social a cargo del empleado (4% salud, 4% pensión, fondo de solidaridad pensional).
+  * Provisiones y Aportes Patronales: Cálculo automático de cesantías, intereses sobre cesantías,
+    prima de servicios, vacaciones, seguridad social empleador y parafiscales (SENA, ICBF, Comfama/Cajas).
+  * Causación Contable Automática: Genera el comprobante contable debitando cuentas de gasto (5105/5205)
+    y acreditando pasivos laborales (2370, 2380, 2505).
+  * Nómina Electrónica DIAN: Generación del documento soporte de pago de nómina electrónica en XML,
+    cálculo del CUNE (Código Único de Nómina Electrónica), firma digital y envío al WebService de la DIAN.
+
+5.12. MÓDULO DE CONTABILIDAD GENERAL, CAUSACIÓN AUTOMÁTICA Y NIIF / IFRS
+- Formularios: CuentasPuc, NotaConta1, Comp2diario, CierrePer, CierreAnu2, ParaConGen, ParaCieConta,
+  ParInfConta, ParInfNiif1, ParInfNiif2, ParInfNiif3, ParNotaNiif, DepreciaAut1, MedMag1, MedMag2,
+  MedMag3, BusNotConta.
+- Tablas: compdiario, comprobantes, detcuentas, cuentaspuc, parinfcontab, parinfcabniif, parinfdetniif,
+  mediomag, mediomdet, revelaciones, cierresper, prodactfij, prodacttar.
+- Reportes: RepBalaPrue7, RepBalaPrue8, RepMayBal3, RepEstFin3, RepEstCPat, RepFluCaj, RepLibAux5,
+  RepMoviCue3, RepPlanCue, RepCoDiari5, RepNiif2, RepNiif3, RepCerReten, RepIvaret2, RepFiscal1, RepActFijo.
+- Funcionalidades:
+  * Contabilidad Integrada: Cada operación realizada en ventas, compras, caja, bancos, inventarios
+    o nómina genera su respectiva causación en tiempo real sin requerir re-digitación contable.
+  * Libros Oficiales: Generación de Balance de Comprobación, Balance General, Estado de Resultados,
+    Libro Diario y Libros Auxiliares detallados por cuenta y por tercero.
+  * NIIF / IFRS: Mapeo de cuentas contables locales a la taxonomía NIIF para Pymes (Grupo 2)
+    o Plenas (Grupo 1). Generación de Estados Financieros bajo NIIF y notas/revelaciones a los estados financieros.
+  * Cierre de Período y Anual: Cancelación automática de cuentas de resultado (clases 4, 5, 6 y 7)
+    contra la cuenta de pérdidas y ganancias del ejercicio y traslado al patrimonio.
+  * Medios Magnéticos DIAN (Información Exógena): Configuración de formatos 1001 (pagos a terceros y retenciones),
+    1003 (retenciones en la fuente que le practicaron), 1005 (IVA descontable), 1006 (IVA generado),
+    1007 (ingresos propios), 1008 (cuentas por cobrar), 1009 (cuentas por pagar). Exportación a Excel/XML
+    según prevalidador DIAN.
+  * Activos Fijos: Hoja de vida del activo fijo, ubicación, responsable y cálculo de depreciación
+    automática en línea recta con contabilización automática mensual.
+
+5.13. MÓDULO DE PRESUPUESTO PÚBLICO Y EMPRESARIAL
+- Formularios: Presupuesto, Presupanos, PresuCDP, PresuCRP, PresuNota, PresuOblEgr, CuentPresup,
+  BuscuPresup, BusPresup1, VerdetPresp.
+- Tablas: presupuesto, presupanos, cuentpresup, detpresupues, auxpresupeje.
+- Reportes: ImpPresuCDP, ImpPresupues1, RepPresupCDP1, RepPresupues1, RepPresupues2, RepPresuAxlb1,
+  ImpDetCuPrs1, MnInfPrIngre, MnInfPrgasto, MnInfPrsal1, MnInfPrLbaux, MnInfPrPend.
+- Funcionalidades:
+  * Diseñado para entidades públicas, cooperativas, empresas de servicios o empresas con estricto control de gasto.
+  * Configuración del árbol presupuestal de ingresos y gastos por vigencia fiscal.
+  * Ciclo Presupuestal Completo:
+    1. Apropiación Inicial aprobada.
+    2. Modificaciones al presupuesto: Adiciones, Reducciones y Traslados Presupuestales (PresuNota).
+    3. Certificado de Disponibilidad Presupuestal (CDP): Reserva preventiva de fondos antes de contratar.
+    4. Compromiso Presupuestal (CRP): Afectación definitiva asociada al contrato o pedido.
+    5. Obligación Presupuestal: Reconocimiento del pasivo una vez recibido el bien o servicio.
+    6. Egreso / Giro Presupuestal: Pago efectivo de la obligación.
+  * Informes de Ejecución Presupuestal: Apropiado vs Comprometido vs Obligado vs Pagado y Saldo Disponible.
+
+5.14. MÓDULO VERTICAL: RESTAURANTES, BARES Y CAFETERÍAS (MESAS Y COMANDAS)
+- Formularios: Mesas, Pedimesas, PedAbremesa, PedCambioMes, PedCaMesero, PedComanda, PedConfmesa,
+  PedDespIte, PedDetMesa, PedDividFac, PedImpCuenta, PedMenImpr, PedMenImp2, PedMesCom1, BusComan,
+  RepPedmesEli, Domicilios, BusDomPend.
+- Tablas: mesas, pedidores, detpedires, detpedreseli, emplecoman, domicilios.
+- Reportes: RepComanda, RepComaFac, RepVenComa.
+- Funcionalidades:
+  * Mapa gráfico de mesas del restaurante distribuido por ambientes (Salón principal, Terraza, Bar).
+  * Estados visuales de mesa: Libre (Verde), Ocupada (Rojo), Pidiendo la cuenta (Amarillo).
+  * Apertura de mesa indicando número de comensales y mesero responsable.
+  * Comandas táctiles: selección rápida por familias de platos/bebidas, con modificadores y notas
+    a cocina (ej. "sin cebolla", "término medio", "bebida fría").
+  * Impresión automática en comanderas remotas de Cocina y Bar según el tipo de producto.
+  * Traslado o cambio de comensales de una mesa a otra, y reasignación de mesero.
+  * División de cuentas entre los comensales (PedDividFac): partición de la cuenta en partes iguales
+    o por consumo individual.
+  * Impresión de pre-cuenta (PedImpCuenta) antes de la factura final.
+  * Cierre y facturación directa en formato POS o electrónico.
+  * Módulo de Domicilios (Delivery): Control de cliente que llama, dirección de entrega, repartidor
+    asignado y control de dinero pendiente de cobro en ruta.
+  * Auditoría antifraude: Registro estricto de cancelaciones de ítems de comanda o mesas anuladas (detpedreseli).
+
+5.15. MÓDULO VERTICAL: HOTELERÍA Y GESTIÓN DE ALOJAMIENTO (HABITACIONES)
+- Formularios: HotelHab1, HotelEven, HotelReser, PedAbreHabit, PedCambioHab, PedHabTarR1, PedHabTarR2,
+  PedHotAsiCli, PediHabita, PedMenHabit1, BusReghot, FrRepRHotel, FrRepRHote2.
+- Tablas: regishabita, detreghabita, reservaciones.
+- Funcionalidades:
+  * Configuración de habitaciones: Tipo (Sencilla, Doble, Suite), capacidad, inventario interno de habitación.
+  * Tarifario dinámico por temporada alta/baja, tarifa corporativa, por horas o por noche.
+  * Matriz de reservaciones y control de reservas anticipadas con registro de abonos.
+  * Check-In: Registro de huéspedes con documento de identidad, procedencia, destino y fechas de estadía.
+  * Cargos a la habitación: Todos los consumos del restaurante, bar, lavandería o minibar se cargan
+    directamente al folio de la habitación (MmComaHab).
+  * Check-Out: Liquidación completa de noches de alojamiento más consumos adicionales, facturación
+    y liberación inmediata de la habitación para el equipo de aseo/camarería.
+
+5.16. MÓDULO VERTICAL: INDUSTRIA CAFETERA (COMPRA DE CAFÉ Y PRUEBA DE TAZA)
+- Formularios: CompCafe, CafeMopre, CafeTaza, BusCafLote, BusCaftaza, ExelComCafe.
+- Tablas: comicafe, controlcafe, fincas.
+- Reportes: ImpCafTaza, RepTaza1.
+- Funcionalidades:
+  * Módulo de altísima especificidad para la región cafetera colombiana (Marsella, Risaralda y Eje Cafetero).
+  * Liquidación de Café Pergamino Seco (CPS) y Café Cereza:
+    - Captura de peso bruto, tara del vehículo/sacos y peso neto.
+    - Determinación de humedad, porcentaje de pasilla e impurezas.
+    - Cálculo técnico del Factor de Rendimiento (kilos de café pergamino requeridos para obtener un saco
+      de 70 kg de café excelso para exportación).
+    - Liquidación del precio por carga o arroba según el precio base de la Federación Nacional de Cafeteros
+      y bonificaciones o penalizaciones por calidad.
+  * Análisis de Laboratorio y Calidad (Control de Calidad y Catación):
+    - Registro de análisis físico de la almendra (grano brocado, negro, vinagre, decolorado).
+    - Evaluación sensorial / Prueba de Taza (SCA): Fragancia, aroma, sabor, acidez, cuerpo, dulzor,
+      balance, uniformidad y taza limpia.
+  * Registro y trazabilidad de fincas cafeteras y lotes de producción para cafés especiales y de origen.
+
+5.17. MÓDULO VERTICAL: FACTURACIÓN EN BLOQUE Y SERVICIOS PÚBLICOS (LECTURAS)
+- Formularios: FacBloqServ, FacLotServ, FaclotLect1, FacvenServ, ExelFacLote1, ExelUsuServ, SPEstCate.
+- Tablas: succategoria, sucestratos, sucvalbloque, sucursales.
+- Reportes: ImpFacServ1, ImpFacServ2.
+- Funcionalidades:
+  * Facturación de Acueductos Comunitarios, Empresas de Servicios Públicos (Agua, Aseo, Energía),
+    Internet, Cuotas de Administración de Copropiedades o Mensualidades de Colegios.
+  * Padrón de suscriptores clasificado por rutas de lectura, bloques geográficos, estratos (1 a 6)
+    y uso del suelo (Residencial, Comercial, Oficial).
+  * Toma de Lecturas de Medidores: Captura de la lectura anterior y lectura actual, cálculo automático
+    de metros cúbicos o kilovatios consumidos, detección de consumos anormales o promedios.
+  * Emisión Masiva en Bloque: Generación de cientos o miles de facturas simultáneas con cobro de cargo fijo,
+    consumo básico, complementario y suntuario, subsidios y contribuciones de ley.
+  * Impresión en formato de recibo de servicios públicos con código de barras de recaudo bancario.
+
+5.18. MÓDULO VERTICAL: TALLER Y SERVICIO TÉCNICO DE EQUIPOS
+- Formularios: Solordserv1, SolServicio, Remequip, RemeqDev, BusServtec, BusSolOrd.
+- Tablas: servicios, solservicios, detsolser.
+- Reportes: ImpDocServTec, RepCoServTec2, ImpSolordserv, RepSolOrdFa3, RepSolOrdPend.
+- Funcionalidades:
+  * Recepción de equipos (computadores, maquinaria, electrodomésticos, vehículos).
+  * Registro de accesorios entregados, estado físico superficial, falla reportada por el cliente.
+  * Diagnóstico del técnico, cotización previa de repuestos y mano de obra para autorización del cliente.
+  * Hoja de control de servicio técnico realizado y liquidación de garantías.
+  * Facturación de la orden de servicio al entregar el equipo reparado.
+
+5.19. MÓDULO VERTICAL: VEHÍCULOS Y MASCOTAS
+- Formularios: SucVehimasc, ExelUsuVehMas.
+- Tablas: sucvehimasc.
+- Funcionalidades:
+  * Registro de placas de vehículos, marca, modelo, kilometraje y propietario (útil para talleres mecánicos,
+    parqueaderos o condominios).
+  * Registro de mascotas (nombre, raza, edad, vacunación) aplicable a clínicas veterinarias y pet shops.
+
+5.20. MÓDULO DE INTEROPERABILIDAD E IMPORTACIONES MASIVAS DESDE EXCEL
+- Formularios: ExelCatProd2, ExelCatTer2, ExelCaCuentas, ExelCaCuPresp, ExelStocBod, ExelCompra,
+  ExelFacLote1, ExelComCafe, ExelUsuServ, ExelUsuVehMas.
+- Funcionalidades:
+  * Asistentes de importación masiva desde archivos de Microsoft Excel (.xls/.xlsx) para poblar
+    el sistema en implementaciones iniciales o migraciones de catálogo:
+    - Maestro de productos y precios.
+    - Maestro de clientes, proveedores y terceros con sus datos tributarios.
+    - Plan único de cuentas y saldos contables iniciales.
+    - Árbol presupuestal.
+    - Carga de stock inicial por bodega.
+    - Carga masiva de facturas de compra.
+    - Carga masiva de suscriptores de servicios y lecturas de contadores.
+  * Exportación de cualquier grilla o consulta del sistema hacia archivos de Excel con un clic (CmdExpExel).
+
+====================================================================================================
+6. CATÁLOGO COMPLETO DE LOS 408 FORMULARIOS (.NET WINFORMS)
+====================================================================================================
+A continuación se detalla la lista completa de los 408 formularios compilados en SgHermes.exe,
+clasificados por su área operativa:
+
+A. ACCESO, NAVEGACIÓN Y CONFIGURACIÓN BASE (12 Formularios)
+   1. FrmInicio: Pantalla principal de carga del sistema y comprobación de base de datos.
+   2. Frmlogin: Ventana de autenticación de usuario y clave.
+   3. frmSplash: Pantalla de presentación con logotipo y créditos.
+   4. frmAbout: Ventana de "Acerca de SG Hermes", versión y autoría.
+   5. Menu: Contenedor MDI y barra de menús principal con todas las opciones del ERP.
+   6. BloqSistema: Bloqueo de terminal por inactividad.
+   7. CambioCla: Cambio de clave de usuario.
+   8. Usuarios: Mantenimiento del catálogo de usuarios.
+   9. UsuaPerm: Matriz de permisos por usuario y formulario.
+   10. UsuPermesas: Permisos de usuarios asignados a la operación de mesas.
+   11. Registro: Control de activación y licenciamiento del software.
+   12. Pirata: Ventana de alerta y control anti-manipulación / licencia no válida.
+
+B. EMPRESA Y CONFIGURACIONES GENERALES (15 Formularios)
+   13. Empresa: Datos societarios, NIT, dirección, régimen y logo de la empresa.
+   14. EmpAgencias: Configuración de agencias y sucursales.
+   15. EmpImpTike: Configuración de impresión de tiquetes por terminal.
+   16. ParaGen: Parámetros operativos generales (decimales, separadores, redondeos).
+   17. ParaConGen: Parámetros generales contables.
+   18. ParaCieConta: Parámetros para el proceso de cierre contable.
+   19. ParaCanCue: Parámetros de cancelación de cuentas.
+   20. ParaLugImpre1: Asignación de impresoras por tipo de documento.
+   21. ParaProvTec1: Parámetros de conexión con el proveedor tecnológico de facturación.
+   22. ParaFacElEcu1: Configuración de parámetros de facturación electrónica.
+   23. ParaSubInv: Parámetros para el manejo de subinventarios (lotes/seriales).
+   24. ParaLisPre: Parámetros globales de listas de precios.
+   25. ParaDctPre1: Configuración de rangos de descuentos sobre precios.
+   26. ParSerpGen1: Parámetros generales para facturación de servicios públicos.
+   27. ResDian: Registro y control de resoluciones de facturación autorizadas por la DIAN.
+
+C. MAESTROS Y CATÁLOGOS BASE (25 Formularios)
+   28. Terceros: Maestro integral de terceros (clientes, proveedores, empleados, bancos).
+   29. TerceNue: Formulario de creación rápida de terceros desde documentos.
+   30. CamTerce: Modificación y actualización de datos de terceros.
+   31. TerceSucu1: Sucursales asociadas a terceros.
+   32. TerceSucUsu: Usuarios autorizados por sucursal de tercero.
+   33. TerCredcla: Asignación de claves y cupos de crédito para clientes.
+   34. Productos: Maestro general de productos y artículos de inventario.
+   35. ProduNue: Creación rápida de productos durante la facturación o compra.
+   36. Servicios: Catálogo de servicios facturables no inventariables.
+   37. CuentasPuc: Plan Único de Cuentas (PUC) con su jerarquía.
+   38. Cuentas: Consulta y edición de cuentas contables auxiliares.
+   39. FormaPago: Formas y medios de pago (efectivo, tarjetas, transferencias).
+   40. DetIvas: Definición de tarifas de IVA e impuestos al consumo.
+   41. ConcepIE: Conceptos estándar para clasificación de ingresos, egresos y compras.
+   42. ConceNue: Creación rápida de nuevos conceptos operativos.
+   43. CenCosto: Estructura de centros de costo para costeo departamental.
+   44. Cargos: Cargos y puestos de trabajo del personal.
+   45. Ciudades: Catálogo de municipios y ciudades de Colombia (código DANE).
+   46. Deptos: Departamentos y regiones.
+   47. Zonas1: Zonas comerciales o de reparto.
+   48. Bodegas: Almacenes y bodegas de almacenamiento de mercancías.
+   49. SelCosBod: Selección y asignación de costos por bodega.
+   50. CajasPOS: Catálogo de cajas registradoras de mostrador.
+   51. Contadores: Mantenimiento de contadores y consecuenciales de documentos.
+   52. UndMedidas1: Catálogo de unidades de medida (kg, gr, m, und, caja, litro).
+
+D. FACTURACIÓN Y VENTAS (38 Formularios)
+   53. Facventas: Facturación de venta estándar (formato carta/media carta).
+   54. FacvenPos: Facturación de punto de venta (POS - tirilla rápida).
+   55. Cotizacion: Emisión y seguimiento de cotizaciones comerciales.
+   56. Pedidos: Registro y control de pedidos de clientes.
+   57. Remision: Remisiones de entrega de mercancía sin factura.
+   58. NotdebCLI: Nota Débito comercial y electrónica a clientes.
+   59. NotcreCLI: Nota Crédito comercial y electrónica a clientes (devoluciones).
+   60. Transfacven: Traslado o conversión de remisiones y pedidos a factura.
+   61. DctGen: Aplicación de descuentos globales y promociones a documentos.
+   62. FacvenServ: Facturación de venta de servicios periódicos.
+   63. FacLotServ: Facturación periódica en lote para cobros mensuales.
+   64. FacBloqServ: Facturación en bloque agrupada por zonas o sectores.
+   65. FaclotLect1: Captura de lecturas de contadores para facturación de servicios.
+   66. SPEstCate: Parámetros de estratos y categorías de cobro para servicios públicos.
+   67. SucVehimasc: Control de vehículos y mascotas asociados a suscriptores o clientes.
+   68. DocElenvio1: Consola de envío de facturas electrónicas a la DIAN.
+   69. DocElReenv2: Consola de reenvío de documentos electrónicos rechazados.
+   70. FacElConsul1: Consulta de estado de documentos electrónicos ante la DIAN.
+   71. FacEleInform1: Reportes e informes consolidados de facturación electrónica.
+   72. FrModPreven: Modificación controlada del precio de venta en grilla.
+   73. FrModPreVe2: Modificación alternativa de precios de venta.
+   74. FrModPreIte1: Modificación de precio unitario por ítem.
+   75. FrModIva: Ajuste manual del porcentaje de IVA en transacción.
+   76. FrModDirecli: Cambio de dirección de entrega para la factura actual.
+   77. FrModEnvcorreo: Ventana de despacho manual de factura por correo electrónico.
+   78. FrModObsdet1: Inserción de observaciones detalladas por línea de producto.
+   79. FrModObserva1: Inserción de observaciones generales del documento.
+   80. FrModBorite: Autorización para eliminar ítems digitados en grilla.
+   81. FrModCosto: Modificación autorizada de costo de producto.
+   82. FrModResform: Modificación de resolución de facturación aplicada.
+   83. FrModFormProd1: Cambio de fórmula o receta asociada a producto.
+   84. FrModUndMed: Selección de unidad de medida alternativa en la venta.
+   85. FrModSubinv: Selección de serial o lote específico durante la venta.
+   86. FrModAnuDoc: Ventana de captura del motivo de anulación de documentos.
+   87. FrVerKits1: Visualización del detalle de componentes de un kit en venta.
+   88. FrModKits1: Modificación de la estructura de un kit en línea.
+   89. SeleDocu: Selección de tipo de documento a cargar.
+   90. SelCaja: Selección de caja POS de trabajo al iniciar turno.
+
+E. RESTAURANTE, BARES Y COMANDAS (21 Formularios)
+   91. Mesas: Mantenimiento del catálogo de mesas del restaurante.
+   92. Pedimesas: Pantalla táctil de control y pedidos por mesa.
+   93. PedAbremesa: Apertura de mesa con número de clientes y mesero.
+   94. PedCambioMes: Cambio o fusión de mesas.
+   95. PedCaMesero: Reasignación de mesero a una mesa abierta.
+   96. PedComanda: Captura detallada de ítems de comanda.
+   97. PedConfmesa: Configuración geométrica y de estado de las mesas.
+   98. PedDespIte: Envío y confirmación de despacho de ítems a cocina/bar.
+   99. PedDetMesa: Visualización de los consumos acumulados en la mesa.
+   100. PedDividFac: Herramienta para dividir la cuenta entre varios clientes.
+   101. PedImpCuenta: Impresión del estado de cuenta provisional (pre-cuenta).
+   102. PedMenImpr: Configuración y envío a impresoras comanderas remotas.
+   103. PedMenImp2: Selección de comanderas de despacho secundarias.
+   104. PedMesCom1: Gestión de comandas pendientes de despacho.
+   105. BusComan: Consulta y búsqueda de comandas emitidas.
+   106. FrRepComan: Reporte consolidado de comandas atendidas.
+   107. FrRepComa2: Reporte detallado de comandas por mesero.
+   108. FrRepComasin: Reporte de comandas sin facturar.
+   109. RepPedmesEli: Reporte de auditoría de pedidos o platos eliminados de mesas.
+   110. Domicilios: Módulo de recepción y asignación de pedidos a domicilio.
+   111. BusDomPend: Monitoreo de domicilios pendientes de entrega o cobro.
+
+F. HOTELERÍA Y ALOJAMIENTO (13 Formularios)
+   112. HotelHab1: Consola central de ocupación de habitaciones.
+   113. HotelReser: Módulo de reservas de habitaciones con calendario.
+   114. HotelEven: Registro de eventos especiales y alquiler de salones.
+   115. PedAbreHabit: Check-in y apertura de cuenta para habitación.
+   116. PedCambioHab: Traslado de huésped a otra habitación.
+   117. PedHabTarR1: Configuración de tarifas estándar de habitación.
+   118. PedHabTarR2: Configuración de tarifas especiales o de temporada.
+   119. PedHotAsiCli: Asignación de huéspedes acompañantes a la habitación.
+   120. PediHabita: Registro de consumos directos a la habitación.
+   121. PedMenHabit1: Menú de consumos (room service / frigobar) para habitaciones.
+   122. BusReghot: Búsqueda y consulta del libro de registro de huéspedes.
+   123. FrRepRHotel: Informe de ocupación hotelera y pasajeros hospedados.
+   124. FrRepRHote2: Informe de ingresos y facturación por concepto de hotelería.
+
+G. SECTOR CAFÉ Y CATACIÓN (8 Formularios)
+   125. CompCafe: Módulo de liquidación y compra de café pergamino / cereza.
+   126. CafeMopre: Actualización de precios diarios del café por carga/arroba.
+   127. CafeTaza: Registro de análisis sensorial y prueba de taza de café.
+   128. BusCafLote: Búsqueda y trazabilidad de lotes de café comprados.
+   129. BusCaftaza: Consulta histórica de evaluaciones de catación y taza.
+   130. RepTaza1: Consola de reportes de calidad y perfiles de taza.
+   131. ExelComCafe: Importación de planillas de compra de café desde Excel.
+   132. RepVenCulti: Reporte de ventas y compras asociadas a cultivos de café.
+
+H. COMPRAS, PROVEEDORES Y RADIAN (12 Formularios)
+   133. Compras: Causación de facturas de compra y entrada de almacén.
+   134. Ordencom: Elaboración y seguimiento de órdenes de compra.
+   135. NotaDebCom: Nota Débito a proveedor por devolución en compras.
+   136. NotcrePRO: Nota Crédito otorgada por el proveedor.
+   137. Buscompras: Búsqueda y consulta de compras causadas.
+   138. Busordenc: Búsqueda y consulta de órdenes de compra pendientes.
+   139. ComEvenrece1: Módulo individual de generación de eventos DIAN Radian.
+   140. ComEvenBloq1: Generación y transmisión masiva en bloque de eventos Radian.
+   141. RecepMerca2: Recepción física de mercancía en muelle/almacén.
+   142. BusRecemer: Consulta de recepciones de mercancía realizadas.
+   143. BussalRecep: Cruce de recepción de mercancía contra factura de compra.
+   144. ExelCompra: Importación masiva de facturas de compra desde Excel.
+
+I. INVENTARIOS, BODEGAS Y PRODUCCIÓN (30 Formularios)
+   145. Entradas: Registro de entradas de inventario no provenientes de compra.
+   146. Salidas: Registro de salidas de mercancía (bajas, consumos propios).
+   147. TraslaBod1: Registro de traslados físicos entre bodegas.
+   148. SolTrasla: Solicitud de traslado de inventario entre dependencias.
+   149. SolTrasl2: Confirmación y despacho de solicitud de traslado.
+   150. SolTTrae1: Carga de ítems de una solicitud de traslado previa.
+   151. NotaAjuBod: Ajuste de inventario (sobrantes y faltantes de stock).
+   152. ConteoInv: Captura de conteo físico de inventario para auditoría.
+   153. ConteoTrae: Carga de conteo físico a la conciliación de inventario.
+   154. AjuSubInve: Ajuste específico de seriales y lotes de productos.
+   155. Despacho: Guía de despacho de mercancía vendida.
+   156. ListEmpaque: Generación de listas de empaque para despachos logísticos.
+   157. Notaprod: Orden y registro de transformación/producción de productos.
+   158. Notacostos: Determinación de costos indirectos y mano de obra en producción.
+   159. LineaInv1: Configuración de líneas y categorías de productos (Línea 1 a 6).
+   160. NivelInv1: Niveles de jerarquía del catálogo de inventario.
+   161. ListaPre: Mantenimiento y configuración de listas de precios.
+   162. PreciosXpro: Matriz de precios por producto y lista de precios.
+   163. ModPrecio: Modificación de precios de venta individuales.
+   164. ModPreAuto: Incremento o ajuste porcentual masivo de precios.
+   165. ProdadCodbar: Adición de códigos de barra alternativos al producto.
+   166. ProdadLote1: Registro y asignación de números de lote a productos.
+   167. ProdadUndmed: Configuración de factores de conversión entre unidades.
+   168. kardBode: Consulta de kardex valorizado por bodega específica.
+   169. KardxNue: Consulta general de movimientos de kardex.
+   170. BusEntSal: Búsqueda de entradas y salidas de almacén.
+   171. BusEntraSal2: Filtro avanzado de movimientos de inventario.
+   172. BusAjuBod1: Búsqueda de ajustes de inventario realizados.
+   173. BusContInv: Búsqueda de tomas de conteo físico de inventario.
+   174. BusDespa: Búsqueda de guías de despacho emitidas.
+
+J. TESORERÍA, BANCOS Y CAJA (18 Formularios)
+   175. Compingreso: Recibo de caja / Comprobante de ingreso de dinero.
+   176. Compegreso: Comprobante de egreso de caja o banco para pagos.
+   177. ArqCaja: Arqueo y cierre de caja registradora.
+   178. ComCajMen: Recibo de gastos por caja menor.
+   179. ConsBanco: Consignación bancaria de dinero recaudado.
+   180. RetBanco: Retiro o transferencia bancaria.
+   181. ConciBan: Módulo de conciliación bancaria mensual.
+   182. Bancos2: Mantenimiento del catálogo de cuentas bancarias de la empresa.
+   183. BusIngEgr: Consulta y filtrado de ingresos y egresos de tesorería.
+   184. CueAnticipo: Registro y cruce de anticipos recibidos de clientes o proveedores.
+   185. CueDetCaj: Detalle de afectaciones de caja en movimientos.
+   186. CueDetCMen: Detalle de cuentas contables afectadas por caja menor.
+   187. Retimp: Configuración y cálculo de retenciones en la fuente practicadas.
+   188. MasPagos: Pago masivo a proveedores o abonos masivos.
+   189. Maspagcuot2: Recaudo masivo de cuotas financieras.
+   190. SaliniTodo: Carga general de saldos iniciales de cartera y tesorería.
+   191. SaliniTrae1: Importación de saldos iniciales desde documento previo.
+   192. SaliniTraeUsu1: Asignación de saldos iniciales por usuario.
+
+K. CARTERA Y CRÉDITOS (16 Formularios)
+   193. MovCxcP: Consulta integral de cuentas por cobrar y por pagar.
+   194. CueDetCxcP: Detalle de documentos pendientes de cobro o pago.
+   195. CueDet2CxcP: Detalle secundario de cartera.
+   196. CueMenCxcp: Consola de control de cartera mensual.
+   197. SolCreditos: Registro y radicación de solicitudes de crédito.
+   198. SolCredApro: Estudio y aprobación de créditos a clientes.
+   199. FrModAproCre: Modificación del cupo aprobado para un crédito.
+   200. Financiacion: Generación del crédito, pagaré y tabla de amortización.
+   201. PagFina: Pago de cuotas de financiación y abono a capital e intereses.
+   202. FactorFin: Configuración de tasas de interés y factores financieros.
+   203. Bussolcre: Búsqueda de solicitudes de crédito radicadas.
+   204. BusFinan: Consulta de planes de financiación y créditos activos.
+   205. BusPagCXCP: Consulta de pagos y abonos aplicados a cartera.
+   206. Bussal3CXCP: Búsqueda de saldos de cartera clasificados por edades.
+   207. ParInfcxcp: Parámetros para la generación de informes de cartera.
+   208. RepMovCxcHis: Historial de movimientos de cuentas por cobrar.
+
+L. NÓMINA Y RECURSOS HUMANOS (17 Formularios)
+   209. NominaN1: Liquidación de nómina periódica por empleado.
+   210. NominaCau2: Causación contable y liquidación consolidada de nómina.
+   211. NomEmple3: Captura de novedades y tiempos laborados por empleado.
+   212. NomPorEmp: Liquidación individual detallada por trabajador.
+   213. NomPorEm3: Vista alternativa de liquidación de sueldos.
+   214. NomiCopiar: Copia de novedades del período anterior al período actual.
+   215. ParaNomAdm: Parámetros administrativos de nómina (SMMLV, auxilio transporte).
+   216. ParaNomiCon3: Catálogo y fórmulas de conceptos de nómina.
+   217. ParaNomiCuen3: Parametrización de cuentas contables asociadas a cada concepto.
+   218. ParaNomiSum3: Configuración de acumuladores y bases para prestaciones.
+   219. TerceNomi1: Ficha contractual del trabajador (contrato, salario, EPS, pensión).
+   220. TerceNomi2: Beneficiarios y datos de seguridad social del trabajador.
+   221. NominaEl1: Módulo individual de soporte de pago de nómina electrónica.
+   222. NomiLotsop: Generación en bloque de soportes de nómina electrónica.
+   223. NomiElenvio: Transmisión y seguimiento de nómina electrónica ante la DIAN.
+   224. BusNomiEl1: Consulta de nóminas electrónicas transmitidas y CUNE.
+   225. MenImpNom: Menú de impresión de colillas y planillas de nómina.
+
+M. CONTABILIDAD, NIIF Y FISCAL (24 Formularios)
+   226. NotaConta1: Captura de comprobantes y notas de contabilidad manuales.
+   227. Comp2diario: Consulta y generación del libro diario de contabilidad.
+   228. CierrePer: Cierre contable de mes.
+   229. CierreAnu2: Cierre contable de fin de año con cancelación de cuentas de resultado.
+   230. DepreciaAut1: Proceso de cálculo y contabilización de depreciación de activos fijos.
+   231. ParInfConta: Parámetros para emisión de reportes e informes contables.
+   232. ParInfNiif1: Mapeo y equivalencias entre cuentas PUC locales y taxonomía NIIF.
+   233. ParInfNiif2: Configuración de rubros del Estado de Situación Financiera NIIF.
+   234. ParInfNiif3: Configuración de rubros del Estado de Resultados Integral NIIF.
+   235. ParNotaNiif: Redacción y mantenimiento de notas y revelaciones NIIF.
+   236. MedMag1: Configuración de formatos para medios magnéticos DIAN (Exógena).
+   237. MedMag2: Mapeo de conceptos y cuentas contables para información exógena.
+   238. MedMag3: Generación y exportación de archivos prevalidados de exógena.
+   239. BusNotConta: Consulta de notas de contabilidad causadas.
+   240. BusCuentas: Búsqueda rápida de cuentas en el catálogo PUC.
+   241. Cuentrasla: Asistente para trasladar saldos entre cuentas contables.
+   242. Modifidetcue: Modificación de afectaciones contables en documentos.
+   243. CueDetImp: Detalle de bases e impuestos calculados en asientos contables.
+   244. CueDetPro: Detalle de cuentas contables asignadas a proveedores.
+   245. CueMenInven: Detalle de cuentas contables de inventario y costo de ventas.
+   246. CueModifi1: Reclasificación rápida de cuentas contables en movimientos.
+   247. Actualsaldo: Recálculo forzado de saldos de cuentas contables.
+   248. RepCueErr: Detección y auditoría de asientos contables descuadrados.
+   249. RepModCau: Historial de modificaciones a causaciones contables.
+
+N. PRESUPUESTO PÚBLICO Y PRIVADO (14 Formularios)
+   250. Presupuesto: Formulación y registro del presupuesto anual.
+   251. Presupanos: Definición de vigencias fiscales y calendarios presupuestales.
+   252. PresuCDP: Expedición del Certificado de Disponibilidad Presupuestal.
+   253. PresuCRP: Expedición del Certificado de Registro / Compromiso Presupuestal.
+   254. PresuNota: Elaboración de notas de modificación presupuestal.
+   255. PresuOblEgr: Causación de obligaciones presupuestales y órdenes de giro.
+   256. CuentPresup: Mantenimiento del catálogo de rubros presupuestales.
+   257. BuscuPresup: Búsqueda y consulta de rubros presupuestales.
+   258. BusPresup1: Búsqueda de documentos presupuestales emitidos.
+   259. CuedetPresp: Detalle de imputaciones a rubros presupuestales en gastos.
+   260. VerdetPresp: Consulta interactiva de ejecución presupuestal por rubro.
+   261. ExelCaCuPresp: Importación del catálogo de cuentas de presupuesto desde Excel.
+   262. RepFrPresupu1: Consola de reportes de ejecución presupuestal.
+   263. RepFrPresupu2: Consola de reportes analíticos de presupuesto.
+
+O. SERVICIO TÉCNICO Y TALLER (10 Formularios)
+   264. Solordserv1: Formulario de recepción de equipos y orden de servicio técnico.
+   265. SolServicio: Diagnóstico técnico, cotización y ejecución de reparación.
+   266. Remequip: Remisión de entrada de equipos al taller técnico.
+   267. RemeqDev: Remisión de entrega y devolución de equipos al cliente.
+   268. BusServtec: Búsqueda de órdenes de servicio técnico por cliente o equipo.
+   269. BusSolOrd: Búsqueda de solicitudes de repuestos para órdenes técnicas.
+   270. FrRepSolOrPen: Reporte de órdenes de servicio técnico pendientes por ejecutar.
+   271. FrRepOrVFac: Reporte de órdenes de servicio facturadas.
+   272. FrRepPediFac: Reporte de pedidos técnicos facturados.
+   273. RepCoSTec: Consola consolidada de informes de servicio técnico.
+
+P. ASISTENTES DE IMPORTACIÓN MASIVA DESDE EXCEL (11 Formularios)
+   274. ExelCatProd2: Carga masiva de catálogo de productos desde Excel.
+   275. ExelCatTer2: Carga masiva de catálogo de terceros desde Excel.
+   276. ExelCaCuentas: Carga masiva del plan de cuentas PUC desde Excel.
+   277. ExelCaCuPresp: Carga de rubros presupuestales desde Excel.
+   278. ExelStocBod: Carga de existencias y saldos iniciales de bodega desde Excel.
+   279. ExelCompra: Carga masiva de facturas de compra desde planillas Excel.
+   280. ExelFacLote1: Carga de facturación masiva en lote desde Excel.
+   281. ExelComCafe: Carga de planillas de báscula y compras de café desde Excel.
+   282. ExelUsuServ: Carga de padrón de usuarios de servicios públicos desde Excel.
+   283. ExelUsuVehMas: Carga masiva de registros de vehículos y mascotas desde Excel.
+   284. RepCompExel: Exportación analítica de comprobantes a formato Excel.
+
+Q. VENTANAS DE BÚSQUEDA Y FILTRADO RÁPIDO (Prefijo 'Bus*', 32 Formularios)
+   285. Busart: Búsqueda rápida de artículos por descripción, palabras separadas por coma o código de barras.
+   286. BusArtDet: Búsqueda detallada de productos con visualización de precios y stock por bodega.
+   287. Buster: Búsqueda de terceros por NIT, cédula, nombre o razón social.
+   288. BusTerDet: Consulta detallada de cartera, compras y ventas del tercero.
+   289. Busciu: Búsqueda de municipios por código o nombre.
+   290. BusConIE: Búsqueda de conceptos de compras, ingresos y egresos.
+   291. Buscotped: Búsqueda y trazabilidad de cotizaciones y pedidos.
+   292. Busfacven: Búsqueda de facturas de venta por número, fecha o cliente.
+   293. BusfacvenPen: Consulta de facturas pendientes de cobro o despacho.
+   294. BusHisVencli1: Historial cronológico de compras realizadas por un cliente.
+   295. BusMovFven: Búsqueda de movimientos de ítems dentro de facturas de venta.
+   296. BusNotas: Búsqueda general de notas débito y crédito.
+   297. BusNotaprod: Búsqueda de órdenes de producción.
+   298. Busserv: Búsqueda rápida de servicios en catálogo.
+   299. BusSucuAgen: Búsqueda de agencias y sucursales.
+   300. BusSucuUsu: Búsqueda de usuarios vinculados a sucursales.
+   301. Bussalprodfven: Búsqueda de salidas de productos asociadas a facturas.
+   302. BussalDesp: Búsqueda de mercancía despachada pendiente de entrega.
+   303. FrBusLista: Asistente interactivo de búsqueda sobre grillas de datos.
+   304. MenBusFacDes: Búsqueda de facturas para aplicación de descuentos.
+   305. MenDevProd: Búsqueda de facturas para procesar devoluciones de mercancía.
+   306. CompPTrae1: Ventana de búsqueda de documentos previos para importar datos.
+   307. NotaPTrae1 a NotaPTrae6: Asistentes de arrastre de datos entre documentos.
+
+R. CONSOLAS DE CONTROL Y REPORTES (Prefijo 'RepFr*', 'MenRep*', 95 Formularios)
+   308. MenRepAlqE: Menú de reportes de alquileres y eventos.
+   309. MenRepCaj: Menú de reportes de caja y tesorería.
+   310. MenRepComp: Menú de reportes de compras y proveedores.
+   311. MenRepConta: Menú de reportes contables.
+   312. MenRepCXCP: Menú de reportes de cartera y cuentas por pagar.
+   313. MenRepFisca: Menú de reportes de obligaciones tributarias y fiscales.
+   314. MenRepInven: Menú de reportes de existencias y costos de inventario.
+   315. MenReporte: Centro general de informes del sistema.
+   316. MenRepPedido: Menú de reportes de pedidos y entregas.
+   317. MenRepSerTec: Menú de informes de soporte técnico.
+   318. MenRepVenta: Menú de reportes comerciales y de ventas.
+   319. MenInfespecia: Menú de informes de auditoría y análisis especial.
+   320. MenInven: Menú de utilidades de inventario.
+   321. MenLisPre: Menú de consulta de listas de precios.
+   322. MenAjIngEgr: Menú de ajustes a ingresos y egresos.
+   323. RepFrAuxCV: Consola de reportes auxiliares de compras y ventas.
+   324. RepFrComiven: Consola de liquidación de comisiones a vendedores.
+   325. RepFrCuadCaj: Consola de arqueo y cuadre diario de caja.
+   326. RepFrCxcAbo: Reporte de abonos efectuados a cuentas por cobrar.
+   327. RepFrDoDesp: Consola de documentos de despacho y transporte.
+   328. RepFrEnsalbo: Reporte de entradas y salidas discriminadas por bodega.
+   329. RepFrEntSal: Reporte consolidado de movimientos de almacén.
+   330. RepFrEstaFin: Emisión de estados financieros de propósito general.
+   331. RepFrFiscal1: Reporte fiscal de bases e impuestos retenidos (Retefuente/ICA).
+   332. RepFrFiscal2: Reporte fiscal de bases gravadas e IVA generado y descontable.
+   333. RepFrFluCaj: Generación y proyección del flujo de caja.
+   334. RepFrGrafCue: Visualización gráfica de saldos y evolución de cuentas.
+   335. RepFrInVenci: Reporte de productos próximos a vencer o vencidos por lote.
+   336. RepFrInventa1: Reporte de inventario valorizado por bodega.
+   337. RepFrInventa2: Reporte de existencias bajo stock mínimo.
+   338. RepFrInventa3: Reporte de rotación y productos de baja demanda.
+   339. RepFrInventa4: Reporte de rentabilidad bruta estimada por producto.
+   340. RepFrIva1: Reporte bimestral o cuatrimestral de IVA.
+   341. RepFrLinvBal: Balance y valorización de inventarios por línea de producto.
+   342. RepFrLisContra: Reporte de contratos laborales vigentes por vencer.
+   343. RepFrLisCupo: Reporte de cupos de crédito concedidos vs utilizados.
+   344. RepFrLister: Directorio general de clientes y proveedores.
+   345. RepFrLisUsu: Listado de usuarios del sistema y roles asignados.
+   346. RepFrMayBal: Generación del libro Mayor y Balances oficial.
+   347. RepFrMovCajBan: Reporte detallado de movimientos de cuentas bancarias y cajas.
+   348. RepFrMovCajMen: Reporte de legalización de gastos de caja menor.
+   349. RepFrNiif1: Emisión de estados financieros bajo estándares NIIF / IFRS.
+   350. RepFrNomEmp: Consolidado de liquidación de nómina por centro de costo.
+   351. RepFrPrePro: Reporte de listas de precios vigentes por categoría.
+   352. RepFrPresuAxLb: Emisión del libro auxiliar presupuestal.
+   353. RepFrPresuPend: Reporte de compromisos y disponibilidades presupuestales pendientes.
+   354. RepFrProdmasv: Análisis de los productos más vendidos (Pareto / ABC).
+   355. RepFrProform: Emisión masiva de facturas proforma y cotizaciones.
+   356. RepFrPunUtil: Cálculo y reporte del punto de equilibrio operativo.
+   357. RepFrRecem: Reporte de recepciones de mercancía efectuadas.
+   358. RepFrReten1: Certificados de retención en la fuente practicadas a proveedores.
+   359. RepFrTrasla: Reporte de traslados entre bodegas con estado de entrega.
+   360. RepFrUtilCli: Reporte de margen de utilidad obtenido por cada cliente.
+   361. RepFrUtilven1: Reporte de margen de utilidad obtenido por cada venta.
+   362. RepFrVDia: Resumen ejecutivo diario de ventas del negocio.
+   363. RepFrVenHor: Análisis estadístico de ventas distribuidas por hora del día.
+   364. RepFrVenProd1: Detalle de ventas por producto con cantidades e importes.
+   365. RepFrVenRes: Resumen mensual y comparativo anual de ventas.
+   366. RepIndicaVent1: Indicadores clave de rendimiento comercial (KPIs).
+   367. Repingreso: Reporte consolidado de comprobantes de ingreso.
+   368. RepListCue: Listado estructurado del catálogo de cuentas contables.
+   369. RepMinister1: Generación de informes normativos para ministerios o entes de control.
+   370. RepMovCue: Extracto auxiliar de movimientos de una cuenta contable específica.
+   371. RepPretraslado1: Verificación previa a la ejecución de traslados de bodega.
+   372. RepProdSinCos: Alerta de auditoría de productos vendidos o comprados con costo cero.
+   373. RepSalDesp: Reporte de control de salidas de despacho y fletes.
+   374. RepVenComer1: Reporte de ventas agrupadas por clasificación comercial.
+   375. RepVentasExel: Exportación avanzada de la base de datos de ventas a Excel.
+   376. RepActFijo: Reporte de inventario físico y estado de activos fijos.
+   377. RepActMedi1: Reporte de tomas de lectura de contadores de servicios.
+   378. RepAuxLib: Libro auxiliar contable general.
+   379. RepCoCPR: Reporte cruzado de órdenes de compra vs facturas de compra.
+   380. RepCoVent: Informe gerencial de ventas.
+   381. RepDColum: Formato de reporte diario en columnas.
+   382. RepDocHuecos: Auditoría de saltos o huecos en la numeración consecutiva de documentos.
+   383. RepDocuAnu: Auditoría completa de documentos anulados con usuario y motivo.
+   384. FrRepUsudoc: Auditoría de productividad y documentos generados por cada usuario.
+   385. FrRepProLista: Impresión masiva de catálogo de productos con código de barras.
+
+S. UTILIDADES, DISEÑO Y MANTENIMIENTO (23 Formularios)
+   386. Adjunarch: Gestor para adjuntar y visualizar archivos digitales en transacciones.
+   387. CopiaSeg: Asistente para realizar copias de seguridad de la base de datos.
+   388. ResCopiaSeg: Asistente para restaurar copias de seguridad guardadas.
+   389. MenCopSeg: Menú de administración de respaldos del sistema.
+   390. EliminaVar: Módulo de depuración y eliminación de tablas temporales.
+   391. DisePapel: Configuración de dimensiones de papel para impresión.
+   392. Disenoimp1: Diseñador visual de plantillas de impresión para documentos.
+   393. Disenoimp2: Diseñador secundario para formatos de tiquete térmico.
+   394. ImpDesHas: Asistente de impresión por rangos de números (Desde - Hasta).
+   395. ImpDocumen: Vista previa de impresión estándar de documentos.
+   396. Impdocume2: Vista previa alternativa para tiquetes y tirillas.
+   397. ImpEtiqueta: Módulo de diseño e impresión de etiquetas con código de barras.
+   398. ImpReportes: Visor general de reportes de Crystal Reports.
+   399. ImpRepOtros: Visor secundario para reportes especiales.
+   400. DatTempo: Gestión de cursores temporales en memoria.
+   401. Variosdet: Captura de detalles adicionales no contemplados en formularios base.
+   402. Variosde2: Captura secundaria de datos varios.
+   403. Quita_XForm: Utilidad para deshabilitar el botón de cierre [X] de las ventanas.
+   404. Botonedos: Rutinas secundarias de control de botonera.
+   405. Botonesaux: Control auxiliar de navegación.
+   406. VImpTiqNet: Controlador de bajo nivel para impresión en impresoras térmicas .NET.
+   407. cNum2Text: Convertidor de números y valores monetarios a letras para cheques y facturas.
+   408. MyApplication: Clase base del ciclo de vida de la aplicación Windows Forms.
+
+====================================================================================================
+7. CATÁLOGO COMPLETO DE LOS 109 REPORTES (SAP CRYSTAL REPORTS)
+====================================================================================================
+Dentro de SgHermes.exe se encuentran compiladas 109 plantillas de Crystal Reports (derivadas de ReportClass).
+A continuación se detalla su clasificación y función:
+
+A. REPORTES CONTABLES, FINANCIEROS Y TRIBUTARIOS (28 Reportes)
+   1. RepBalaPrue7: Balance de prueba general a 4 dígitos (Cuentas).
+   2. RepBalaPrue8: Balance de prueba detallado a 6 y 8 dígitos (Subcuentas y Auxiliares por tercero).
+   3. RepMayBal3: Libro oficial de Mayor y Balances según normativa contable colombiana.
+   4. RepEstFin3: Estados financieros básicos (Estado de Situación Financiera y Estado de Resultados).
+   5. RepEstCPat: Estado de Cambios en el Patrimonio.
+   6. RepFluCaj: Estado de Flujos de Efectivo por método directo e indirecto.
+   7. RepLibAux5: Libro auxiliar de contabilidad con saldo anterior, débitos, créditos y nuevo saldo.
+   8. RepMoviCue3: Movimientos de cuentas contables agrupados cronológicamente.
+   9. RepPlanCue: Estructura completa del Plan Único de Cuentas (PUC).
+   10. RepCoDiari5: Libro diario consolidado por comprobante o fecha.
+   11. RepNiif2: Estado de Situación Financiera bajo taxonomía NIIF para Pymes.
+   12. RepNiif3: Estado de Resultados Integral bajo NIIF.
+   13. RepGrafCue: Gráficos de barras y líneas para análisis comparativo de ingresos y gastos.
+   14. RepCerReten: Certificado de retención en la fuente a título de Renta practicada a terceros.
+   15. RepIvaret2: Resumen tributario de bases gravadas, IVA generado, IVA descontable y ReteIVA.
+   16. RepFiscal1: Auxiliar fiscal para soporte de la declaración de renta y CREE/Simple.
+   17. ImpNotaConNor: Comprobante de nota de contabilidad estándar en formato media carta.
+   18. ImpNotaConPr2: Comprobante de nota de contabilidad con desglose de centros de costos.
+   19. ImpNotaConPre: Formato de nota contable pre-impresa para papelería continua.
+   20. RepTarActf: Tarjeta de control individual de activos fijos con depreciación acumulada.
+   21. RepListaTerce: Listado maestro de terceros con datos de contacto, régimen y NIT.
+   22. RepCDocAnu: Reporte de auditoría de comprobantes y documentos anulados.
+   23. RepUsudoc: Auditoría de operaciones registradas discriminadas por usuario del sistema.
+   24. RepVarioscue: Análisis comparativo multicuentas.
+   25. RepDiacolumn3: Balance diario presentado en formato tabular multilínea.
+   26. RepNotNT2: Formato de notas internas de contabilidad sin afectación de inventario.
+   27. Cached*: Clases de caché asociadas para acelerar la renderización de los reportes anteriores.
+
+B. REPORTES DE VENTAS, FACTURACIÓN Y COMISIONES (24 Reportes)
+   28. ImpDocFCN7: Factura de venta estándar (Formato carta para clientes empresariales).
+   29. ImpDocFCN8: Factura de venta compacta (Formato media carta horizontal).
+   30. ImpDocFVECU1: Factura Electrónica de Venta con CUFE, código QR y firmas de ley DIAN.
+   31. RepCoVenta5: Control general de ventas con filtros por fecha, cliente y vendedor.
+   32. RepFacVenCT4: Informe detallado de facturación con discriminación de productos, IVA y márgenes.
+   33. RepVenProd1: Ventas consolidadas agrupadas por producto con costo vs precio venta.
+   34. RepProdmasven: Ranking estadístico de los artículos más vendidos en volumen y valor.
+   35. RepVenResu2: Resumen ejecutivo mensual de ventas.
+   36. RepVenResu3: Resumen anual comparativo de ventas por línea de negocio.
+   37. RepVenHora2: Análisis estadístico de ventas agrupadas por franjas horarias (picos de venta).
+   38. RepRepVDia3: Resumen consolidado del cierre de ventas del día.
+   39. RepFacComiVe2: Liquidación de comisiones a vendedores según porcentaje o metas cumplidas.
+   40. RepUtilven1: Reporte de rentabilidad y utilidad bruta generada por cada factura emitida.
+   41. RepUtilCli: Análisis de rentabilidad agrupado por cliente.
+   42. RepUtilNueCli: Análisis de ventas y rentabilidad sobre clientes nuevos captados en el período.
+   43. RepPrecioPr: Listado oficial de precios para mostrador.
+   44. RepProlist2: Catálogo de productos con listas de precios 1 a 5 y códigos de barras.
+   45. RepVenProfom: Formato de cotización / factura proforma para clientes.
+   46. RepPedPendFa2: Listado de pedidos tomados que se encuentran pendientes de facturar o entregar.
+   47. ImpFacServ1: Recibo de cobro mensual de servicios públicos / suscripciones (Formato estándar).
+   48. ImpFacServ2: Recibo de cobro mensual con cupón desprendible para recaudo bancario.
+
+C. REPORTES DE CARTERA Y CRÉDITOS (10 Reportes)
+   49. RepCXC: Balance consolidado de cuentas por cobrar a clientes.
+   50. RepCarCXc2: Cartera detallada factura por factura con fecha de vencimiento y días de mora.
+   51. RepCXCAb2: Relación de recibos de caja y abonos aplicados a la cartera.
+   52. RepCXCMov: Extracto cronológico de movimientos de la cuenta por cobrar de un cliente.
+   53. RepCXCNue1: Reporte de nuevas cuentas por cobrar generadas en el mes.
+   54. RepCXCRes: Resumen ejecutivo de cartera clasificada por edades (0-30, 31-60, 61-90, +90).
+   55. ImpFinancia: Planilla de liquidación de crédito con tabla de amortización y pagaré.
+
+D. REPORTES DE COMPRAS Y PROVEEDORES (4 Reportes)
+   56. RepCoCompra: Informe de facturas de compra causadas en el período por proveedor.
+   57. RepAuxComVen: Auxiliar comparativo entre compras y ventas de mercancías.
+
+E. REPORTES DE TESORERÍA, CAJA Y BANCOS (7 Reportes)
+   58. ImpArqCaja: Planilla de arqueo y cierre físico de caja registradora.
+   59. ImpConsBan: Comprobante soporte de consignación bancaria.
+   60. ImpEgrIng3: Comprobante de egreso o recibo de caja en formato media carta.
+   61. ImpEgrIngPre: Formato de egreso pre-impreso para cheques y vouchers de ventanilla.
+   62. RepMovCajBan: Libro de bancos con detalle de consignaciones, cheques, transferencias y notas.
+   63. RepMovCajMen: Relación de gastos y legalización de caja menor.
+   64. RepCompCt2: Comprobante diario de transacciones de tesorería.
+
+F. REPORTES DE INVENTARIOS, BODEGAS Y PRODUCCIÓN (18 Reportes)
+   65. ImpKardex2: Kardex general valorizado con movimientos de entrada, salida y saldo.
+   66. ImpKardBode: Kardex valorizado filtrado por bodega individual.
+   67. ImpContInv: Planilla física para toma de inventario en almacén (conteo a ciegas).
+   68. RepInvConteo: Informe comparativo entre conteo físico y existencia en sistema.
+   69. RepInventa2: Existencias actuales de inventario valorizadas a costo promedio.
+   70. RepInventa4: Reporte de inventario valorizado a último costo de compra.
+   71. RepInventa6: Reporte de existencias bajo el nivel de stock mínimo permitido.
+   72. RepInvRenta: Análisis de rotación de inventarios y margen de rentabilidad por producto.
+   73. RepDifestoc: Informe de diferencias y descuadres de inventario pendientes de ajuste.
+   74. ImpAjuBod1: Documento soporte de ajuste de inventario por sobrante o faltante.
+   75. ImpTraslaBod1: Guía de remisión para traslado físico de mercancía entre bodegas.
+   76. RepTrasla1: Informe consolidado de traslados interbodegas realizados en el mes.
+   77. ImpSalEnt1: Formato de nota de entrada o salida varia de almacén.
+   78. RepSalEnt1: Relación de notas de entrada y salida de productos.
+   79. RepEntSalIps: Reporte de movimientos de inventario especializado para insumos médicos/clínicos.
+   80. ImpDspacho: Guía formal de despacho y entrega a transportador.
+   81. RepDespacho1: Relación de mercancías despachadas con transportador y destino.
+   82. RepInfSalDesp: Control de remisiones despachadas pendientes de facturar.
+   83. ImpListEmpq: Lista de empaque (Packing List) con detalle de cajas y pesos.
+   84. ImpRecMerca: Acta de recepción y verificación de mercancía en muelle.
+   85. RepRecepm: Relación de actas de recepción de mercancía de proveedores.
+   86. RepNotaProd1: Orden de producción con desglose de materias primas consumidas y producto terminado.
+   87. ImpKits1: Detalle de componentes y despiece de kits armados.
+   88. RepLinVal2: Valorización total del inventario agrupada por líneas de producto.
+
+G. REPORTES DE RESTAURANTE Y COMANDAS (3 Reportes)
+   89. RepComanda: Formato de comanda para despacho en cocina o bar.
+   90. RepComaFac: Factura generada a partir de los consumos acumulados en comanda.
+   91. RepVenComa: Informe de ventas de restaurante por mesero y por turno.
+
+H. REPORTES DE SERVICIO TÉCNICO Y TALLER (5 Reportes)
+   92. ImpDocServTec: Orden de servicio técnico entregada al cliente como soporte de recepción.
+   93. RepCoServTec2: Informe de órdenes de servicio atendidas por técnico responsable.
+   94. ImpSolordserv: Solicitud formal de repuestos e insumos para reparación técnica.
+   95. RepSolOrdPend: Relación de equipos en taller pendientes de diagnóstico o entrega.
+   96. RepSolOrdFa3: Relación de órdenes de servicio técnico ejecutadas y facturadas.
+
+I. REPORTES DE NÓMINA (4 Reportes)
+   97. ImpNomina2: Volante de pago de nómina para el trabajador (Formato tirilla).
+   98. ImpNomina3: Volante de pago de nómina para el trabajador (Formato media carta con firmas).
+   99. RepNomEmp2: Planilla consolidada de pago de nómina por centro de costo.
+   100. RepNomEmp3: Resumen de provisiones sociales y aportes a seguridad social patronales.
+
+J. REPORTES DE PRESUPUESTO (6 Reportes)
+   101. ImpPresuCDP: Certificado formal de Disponibilidad Presupuestal (CDP).
+   102. RepPresupCDP1: Libro consecutivo de CDPs expedidos por vigencia.
+   103. ImpPresupues1: Formato de ejecución del presupuesto.
+   104. RepPresupues1: Estado de ejecución presupuestal de gastos (Apropiado, Comprometido, Pagado).
+   105. RepPresupues2: Estado de ejecución presupuestal de ingresos (Estimado, Reconocido, Recaudado).
+   106. RepPresuAxlb1: Libro auxiliar de presupuesto con desglose por rubro y tercero.
+   107. ImpDetCuPrs1: Informe de apropiaciones presupuestales por rubro.
+
+K. REPORTES DE CAFÉ (1 Reporte)
+   108. ImpCafTaza: Ficha técnica de evaluación sensorial y prueba de taza de café (catación SCA).
+
+====================================================================================================
+8. ANÁLISIS DEL MODELO DE BASE DE DATOS (130 TABLAS MYSQL)
+====================================================================================================
+La base de datos examinada ('marsellasas' en MySQL) contiene 130 tablas físicas que soportan la totalidad
+del ecosistema Hermes. A continuación se agrupan por su función relacional en el modelo:
+
+1. TABLAS MAESTRAS Y DE PARÁMETROS DEL SISTEMA:
+   - empresas: Registro central de la empresa (NIT, razón social, dirección, régimen, teléfonos, logo).
+   - sucursales, succategoria, sucestratos, sucretencion, sucvalbloque: Configuración de sedes y facturación en bloque.
+   - parametros: Variables globales del sistema (decimales, consecutivos, modos de operación).
+   - paraciecue, parinfcontab, parinfcabniif, parinfdetniif: Reglas de cierre y mapeo contable NIIF.
+   - resdian: Tabla crítica con las resoluciones de facturación autorizadas por la DIAN (prefijos, rangos, fechas).
+   - conimpdoc: Parámetros de impresoras asignadas por terminal y tipo de documento.
+   - ciudades, regiones, zonas: Ubicación geográfica normalizada DANE.
+   - bancos, bancosemp: Entidades financieras y cuentas bancarias de la empresa.
+   - cargosemp, contratoemp: Cargos y condiciones contractuales del personal.
+   - cecostos: Centros de costo para imputación contable y de gastos.
+   - concepingegr: Conceptos estándar para compras, ingresos y egresos de caja.
+   - formapago, formapele: Medios de pago y equivalencias ante la DIAN para facturación electrónica.
+
+2. TABLAS DE TERCEROS:
+   - terceros: Maestro principal de clientes, proveedores, empleados y socios.
+   - tercecorreo: Buzón de correos electrónicos para recepción de facturas electrónicas.
+   - terceepsasi: Afiliaciones de empleados a EPS, Fondos de Pensiones, ARL y Cajas de Compensación.
+   - credclaves: Claves de seguridad para cupos de crédito.
+
+3. TABLAS DE PRODUCTOS, SERVICIOS E INVENTARIOS:
+   - productos: Maestro de productos e insumos (código, nombre, costo, impuestos, inventariable).
+   - prodcodbars: Múltiples códigos de barra asignados a un mismo producto.
+   - produndmeds, undmedidas: Factores de conversión entre unidades de medida (empaques, kilos, unidades).
+   - prodcamposad: Atributos y campos personalizados por artículo.
+   - prodactfij, prodacttar: Módulo de activos fijos y tarjetas de depreciación.
+   - servicios: Catálogo de servicios facturables y tarifas.
+   - linea1 a linea6: Árbol de categorías y clasificación de inventario en 6 niveles.
+   - listapre, preciosxpro, preciosxdct: Listas de precios y reglas de descuentos por cliente o volumen.
+   - bodegas, ubiprodbod: Almacenes físicos y ubicación en estanterías/racks.
+   - entsalida, detentsalida: Cabecera y detalle de notas de entrada y salida de almacén.
+   - traslados, dettraslado: Cabecera y detalle de traslados interbodegas.
+   - ajustes, detajustes: Cabecera y detalle de ajustes de stock por sobrante o faltante.
+   - conteoinv, detconteoinv: Cabecera y detalle de tomas físicas de inventario.
+   - subinventa, subproduct: Trazabilidad de lotes, fechas de expiración y seriales unitarios.
+   - auxkardex, auxinventario, auxinvserial: Tablas auxiliares para cálculo y consulta de kardex.
+
+4. TABLAS DE VENTAS Y FACTURACIÓN:
+   - facventas: Cabecera de facturas de venta (número, fecha, cliente, vendedor, forma de pago, estado).
+   - detfventas: Detalle de productos vendidos (cantidad, valor unitario, descuentos, IVA, costo).
+   - detfvensub: Subdetalle de ítems (seriales o lotes específicos entregados en la venta).
+   - auxdetforpag: Formas de pago aplicadas a la factura (combinaciones de efectivo, tarjetas, crédito).
+   - auxmetafac: Metas de ventas y seguimiento de asesores comerciales.
+
+5. TABLAS DE COMPRAS Y PROVEEDORES:
+   - compras: Cabecera de facturas de compra causadas a proveedores.
+   - detcompras: Detalle de productos comprados, precios pactados e impuestos soportados.
+   - auxcompven, auxdetcompven: Auxiliares para consolidación y cruce de compras y ventas.
+
+6. TABLAS DE FACTURACIÓN ELECTRÓNICA, RADIAN Y DIAN:
+   - respdocfele: Log y respuestas técnicas de la DIAN para cada documento electrónico (CUFE, TrackID, QR).
+   - comevenrecep: Registro de eventos RADIAN transmitidos (030, 031, 032, 033).
+   - provetecno: Configuración del proveedor tecnológico de facturación electrónica.
+
+7. TABLAS DE TESORERÍA, CAJA Y BANCOS:
+   - comprobantes: Cabecera de comprobantes de ingreso (recibos de caja) y egreso.
+   - detcuentas: Movimientos contables y de caja asociados al comprobante.
+   - cajas: Maestro de cajas registradoras de mostrador.
+   - cajaarqueo, detcajarq, cajaspago: Cabecera y desglose de arqueos diarios de caja por cajero.
+   - consbancab, consbandet: Cabecera y detalle de conciliaciones bancarias y extractos.
+   - cuentacobro, detcuecobro: Emisión y soporte de cuentas de cobro.
+
+8. TABLAS DE CARTERA Y CRÉDITOS:
+   - notascxccxp, detnotcxccxp: Notas débito y crédito que afectan la cartera de clientes o proveedores.
+   - auxrepcart: Tabla auxiliar para la generación acelerada de reportes de cartera por edades.
+   - solcreditos, solcreapro, facaprocre: Solicitudes de crédito de clientes y aprobaciones.
+   - financiacion, detfinancia, factorfin: Tablas de amortización, liquidación de cuotas y factores.
+
+9. TABLAS DE NÓMINA:
+   - nominas: Cabecera de liquidación de nómina periódica por centro de costo.
+   - detnomina: Detalle de liquidación por empleado (básico, devengos, deducciones, neto a pagar).
+   - detnomiele: Estructura electrónica enviada a la DIAN para nómina electrónica (CUNE, XML).
+   - nomiconcep, nomiconcuf, nomiconempl: Maestro de conceptos de nómina y asignaciones particulares.
+   - nomisumcab, nomisumdet: Fórmulas de cálculo de prestaciones y bases acumuladas.
+   - retftenomina: Rangos y tablas de retención en la fuente por salarios.
+
+10. TABLAS DE CONTABILIDAD, NIIF Y FISCAL:
+    - cuentaspuc, resolpuc: Catálogo de cuentas contables PUC y resoluciones.
+    - compdiario: Asientos del libro diario contable.
+    - auxrepconta, auxrepdim, auxdetrep, auxdetdoc, auxdoc: Auxiliares para emisión de balances.
+    - cierresper: Registro de cierres de período mensual y anual ejecutados.
+    - revelaciones: Notas y revelaciones cualitativas bajo NIIF.
+    - mediomag, mediomdet: Parámetros y acumulados de información exógena para la DIAN.
+    - retenciones: Tarifas y bases mínimas de retención en la fuente e ICA.
+
+11. TABLAS DE PRESUPUESTO:
+    - presupuesto, presupanos: Formulación presupuestal y vigencias fiscales.
+    - cuentpresup: Catálogo de rubros presupuestales de ingresos y gastos.
+    - detpresupues, auxpresupeje: Ejecución presupuestal (CDPs, CRPs, Giros).
+
+12. TABLAS DE MÓDULOS VERTICALES (RESTAURANTE, HOTEL, CAFÉ, SERVICIOS, TALLER):
+    - mesas, pedidores, detpedires, detpedreseli, emplecoman: Gestión de mesas, pedidos y comandas.
+    - regishabita, detreghabita, reservaciones: Ocupación hotelera, huéspedes y cargos a habitación.
+    - comicafe, controlcafe, fincas: Compras de café, análisis físico, factor de rendimiento y catación.
+    - servicios, solservicios, detsolser: Órdenes de servicio técnico y diagnósticos de taller.
+    - despachos, detdespachos, listempaques, detlistempaq, recepmerca, detrecepmerca: Logística de transporte.
+    - domicilios: Registro y asignación de despachos a domicilio.
+    - sucvehimasc: Registro de placas de vehículos y mascotas.
+
+13. TABLAS DE SEGURIDAD Y AUDITORÍA:
+    - usuarios, usuapermiso, permisoscab, permisosfac, permisosusu: Perfiles, contraseñas y permisos.
+    - contperfiles, contadores: Control de consecuenciales de documentos.
+    - motanudoc: Auditoría estricta de documentos anulados y motivos de anulación.
+    - archadjunto: Archivos binarios o rutas de documentos digitalizados adjuntos.
+    - seguimcli: Historial de seguimiento y CRM básico de clientes.
+
+====================================================================================================
+9. DIAGNÓSTICO DE INGENIERÍA INVERSA: VULNERABILIDADES Y DEUDA TÉCNICA
+====================================================================================================
+Durante el análisis estático y dinámico de los binarios, código desensamblado y esquemas de datos,
+se han identificado los siguientes hallazgos críticos de deuda técnica, obsolescencia y riesgos de seguridad:
+
+1. RIESGOS DE SEGURIDAD CRÍTICOS:
+   - Almacenamiento de credenciales en texto plano:
+     El archivo 'servidor.txt' en la carpeta de instalación almacena la dirección IP del servidor MySQL,
+     el usuario 'root' y el nombre de la base de datos sin ningún tipo de cifrado. Cualquier usuario
+     con acceso a la carpeta puede leerlo y conectarse con permisos de superusuario a la base de datos.
+   - Inyección SQL masiva:
+     Las sentencias SQL en los módulos BotGuarMa, Boteliminar y Vardos se construyen mediante concatenación
+     directa de cadenas ("SELECT ... WHERE nit = '" & txtnit.Text & "'"). Esto hace al sistema altamente
+     vulnerable a inyecciones SQL tanto accidentales (caracteres especiales como comillas) como maliciosas.
+   - Uso de componentes ActiveX obsoletos y vulnerables:
+     La inclusión de Flash.ocx y ShockwaveFlashObjects.dll representa un vector de vulnerabilidad grave.
+     Adobe Flash fue descontinuado oficialmente y bloqueado en Windows por múltiples fallas de ejecución
+     remota de código (RCE).
+   - Ausencia de cifrado en tránsito:
+     La conexión entre los terminales y la base de datos MySQL viaja a través del puerto 3306 sin SSL/TLS,
+     lo que permite la captura de datos sensibles (salarios, transacciones, datos de clientes)
+     mediante análisis de tráfico de red.
+
+2. DEUDA TÉCNICA Y LIMITACIONES DE ARQUITECTURA:
+   - Conexión basada en COM ADODB sobre MySQL ODBC 5.1:
+     El uso de la capa COM ADODB (.NET Interop) sobre un driver ODBC antiguo (5.1) de 32 bits introduce
+     cuellos de botella severos, fugas de memoria por falta de liberación explícita de Recordsets
+     y bloqueos de concurrencia cuando múltiples cajas POS facturan simultáneamente.
+   - Ausencia de integridad referencial declarativa en el motor:
+     Gran parte de las tablas de la base de datos fueron creadas bajo el motor MyISAM o sin restricciones
+     FOREIGN KEY formales. La integridad referencial depende exclusivamente de que el código del formulario
+     haga los borrados o actualizaciones en cascada. Si la aplicación se cierra de forma abrupta,
+     quedan registros huérfanos e inconsistencias contables irreparables.
+   - Monolito de interfaz gráfica acoplada a la lógica de negocio:
+     No existe separación de capas (Arquitectura MVC, Clean Architecture o n-capas). El formulario
+     WinForms contiene la validación visual, la lógica matemática y la ejecución de la consulta SQL
+     directamente en el evento del botón. Esto impide reutilizar la lógica para crear una app móvil
+     o un portal web sin tener que reescribirla por completo.
+   - Dependencia pesada de SAP Crystal Reports:
+     Los 109 reportes compilados en Crystal Reports exigen la instalación de runtimes pesados en cada equipo
+     cliente, son lentos para exportar a formatos modernos y no se pueden visualizar en dispositivos móviles.
+   - Mantenimiento y escalabilidad:
+     El ejecutable principal pesa más de 37 MB. Cualquier cambio menor en una resolución o tasa de IVA
+     exige recompilar y redistribuir todo el monolito en todas las terminales físicas de la empresa.
+
+====================================================================================================
+10. PLAN ESTRATÉGICO Y RECOMENDACIONES PARA EL NUEVO SOFTWARE MEJORADO
+====================================================================================================
+Con base en la ingeniería inversa realizada, se propone una estrategia clara para reconstruir y mejorar
+el software SG Hermes en una plataforma moderna, escalable, segura y multidispositivo:
+
+FASE 1: DISEÑO DEL NUEVO BACKEND Y BASE DE DATOS (MIGRACIÓN DEL CORE)
+1. Base de Datos Moderna:
+   - Migrar la base de datos a PostgreSQL 16 o MySQL 8.0 / MariaDB 11.
+   - Establecer restricciones FOREIGN KEY formales, índices optimizados y tipos de datos modernos (UUID, JSONB, TIMESTAMP).
+   - Implementar migraciones automáticas versionadas (usando Prisma, Flyway o Liquibase).
+2. API RESTful / GraphQL de Alto Rendimiento:
+   - Construir una API centralizada en Node.js (NestJS / Express con TypeScript) o ASP.NET Core 8 Web API / Go.
+   - Desacoplar toda la lógica de negocio: facturación, nómina, inventarios y contabilidad residirán
+     únicamente en el servidor, no en los clientes.
+   - Autenticación segura mediante JWT (JSON Web Tokens) con roles y permisos granulares (RBAC),
+     contraseñas hasheadas con BCrypt/Argon2 y conexiones obligatorias HTTPS/WSS con cifrado TLS 1.3.
+
+FASE 2: MÓDULO DE FACTURACIÓN ELECTRÓNICA, NÓMINA Y RADIAN MODERNO
+1. Microservicio Desacoplado para la DIAN:
+   - Servicio autónomo que genera los XML UBL 2.1, aplica el certificado de firma digital, calcula CUFE/CUNE/CUDE,
+     emite el código QR vectorial y consume los WebServices de la DIAN sin bloquear la interfaz del usuario.
+   - Cola de mensajería (RabbitMQ / Redis) para reenvíos automáticos en caso de caída del portal de la DIAN.
+   - Despacho automatizado de facturas por e-mail a clientes mediante plantillas HTML responsive y adjuntos ZIP.
+
+FASE 3: FRONTEND MODERNO, RESPONSIVE Y MULTIPLATAFORMA
+1. Aplicación Web Progresiva (PWA):
+   - Desarrollar la interfaz en React.js, Next.js, Vue 3 o SvelteKit con componentes Tailwind CSS.
+   - Permitirá acceder al sistema desde cualquier computador (Windows, Mac, Linux), tablet o celular
+     sin requerir instalación de ejecutables pesados.
+2. Modo POS Offline / Punto de Venta Táctil:
+   - Para las cajas de restaurante y mostrador, implementar soporte offline mediante Service Workers e IndexedDB,
+     de modo que la caja pueda seguir cobrando e imprimiendo tiquetes aunque se caiga el internet, sincronizando
+     automáticamente los datos al reanudar la conexión.
+   - Interfaz táctil ergonómica para el mapa de mesas de restaurante y comandas desde smartphones para meseros.
+
+FASE 4: MOTOR DE REPORTES LIGERO Y EXPORTACIONES
+1. Reemplazo de Crystal Reports:
+   - Sustituir Crystal Reports por generadores nativos de PDF de alto rendimiento (Puppeteer, QuestPDF, jsPDF).
+   - Generación instantánea de facturas, tirillas, colillas de pago y balances en PDF y visualización
+     directa en el navegador.
+   - Exportación nativa y veloz a archivos Excel (.xlsx) reales con fórmulas y formato profesional.
+
+FASE 5: MODULARIZACIÓN Y MODELO SAAS O MULTIEMPRESA
+1. Arquitectura Modular:
+   - Permitir activar o desactivar módulos según el giro de negocio del cliente mediante licencias modulares:
+     * Paquete Comercio / Facturación POS
+     * Paquete Restaurante / Bar (Mesas y Comandas)
+     * Paquete Hotelero (Habitaciones y Reservas)
+     * Paquete Cafetero (Compra de Café y Catación)
+     * Paquete Servicios Públicos / Cuotas Masivas (Lecturas)
+     * Paquete Nómina y Contabilidad General NIIF
+   - Arquitectura Multi-inquilino (Multi-tenant): Posibilidad de alojar el sistema en la nube (AWS, Azure, DigitalOcean)
+     y ofrecerlo como software como servicio (SaaS) a múltiples clientes con bases de datos aisladas.
+
+====================================================================================================
+CONCLUSIÓN:
+El software "SG Hermes" posee un valor funcional inmenso debido a los años de parametrización de casos
+de negocio colombianos y requerimientos legales tributarios DIAN. Sin embargo, su infraestructura técnica
+actual (.NET 4.5 WinForms, COM ADODB, Flash, Crystal Reports y SQL embebido) ha llegado al final de su
+ciclo de vida útil. La reingeniería propuesta permitirá conservar el 100% de la funcionalidad de negocio
+aquí documentada, dotando a la empresa de un sistema moderno, ultra-rápido, seguro, adaptable a la web
+y dispositivos móviles, y con altísima capacidad de escalabilidad comercial.
+====================================================================================================
+FIN DEL INFORME TÉCNICO
+====================================================================================================
