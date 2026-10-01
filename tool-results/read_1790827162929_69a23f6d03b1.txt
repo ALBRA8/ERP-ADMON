@@ -1,0 +1,742 @@
+     1→// ============================================================
+     2→// niif.ts — Generadores de Estados Financieros NIIF (IFRS)
+     3→// para el ERP Marsella.
+     4→//
+     5→// Funciones principales (server-side, requieren `db`):
+     6→//   - generarESF(empresaId, fechaFin)
+     7→//        → Estado de Situación Financiera (Balance General NIIF)
+     8→//   - generarEER(empresaId, fechaInicio, fechaFin)
+     9→//        → Estado de Resultado Integral
+    10→//   - generarECP(empresaId, fechaInicio, fechaFin)
+    11→//        → Estado de Cambios en el Patrimonio
+    12→//   - generarEFE(empresaId, fechaInicio, fechaFin)
+    13→//        → Estado de Flujos de Efectivo (método indirecto)
+    14→//   - generarNotasNIIF(empresaId, fechaFin)
+    15→//        → Notas a los estados financieros (resumen)
+    16→//
+    17→// Bajo IFRS (NIC 1), los estados financieros se preparan bajo
+    18→// el principio de devengo (no caja) y se presentan con la
+    19→// clasificación corriente/no corriente. Esta librería los
+    20→// genera a partir de los movimientos contables (PUC) de la
+    21→// empresa, usando el mapeo `PUC_TO_NIIF` en `niif-mapping.ts`.
+    22→// ============================================================
+    23→
+    24→import { db } from "@/lib/db";
+    25→import { round } from "@/lib/currency";
+    26→import {
+    27→  agruparSaldosPorCategoria,
+    28→  mapCuentaPUCtoNIIF,
+    29→  sumarSaldos,
+    30→  type NIIFCategory,
+    31→  type SaldoLine,
+    32→  type SaldosPorCategoria,
+    33→} from "@/lib/niif-mapping";
+    34→
+    35→const TASA_IMPUESTO_RENTA = 0.33; // 33% en Colombia (sujeto a cambios)
+    36→
+    37→// ============================================================
+    38→// Helpers internos
+    39→// ============================================================
+    40→
+    41→interface FechaInput {
+    42→  fechaInicio?: string | Date;
+    43→  fechaFin: string | Date;
+    44→}
+    45→
+    46→function toDate(value: string | Date): Date {
+    47→  if (typeof value === "string") {
+    48→    // Si es fecha sin hora (YYYY-MM-DD), tomar el final del día para fechaFin
+    49→    const d = new Date(value);
+    50→    if (!isNaN(d.getTime())) return d;
+    51→    return new Date(value);
+    52→  }
+    53→  return value;
+    54→}
+    55→
+    56→function endOfDay(d: Date): Date {
+    57→  const x = new Date(d);
+    58→  x.setHours(23, 59, 59, 999);
+    59→  return x;
+    60→}
+    61→
+    62→function startOfDay(d: Date): Date {
+    63→  const x = new Date(d);
+    64→  x.setHours(0, 0, 0, 0);
+    65→  return x;
+    66→}
+    67→
+    68→// Carga movimientos contables contabilizados hasta fechaFin
+    69→async function cargarMovimientos(
+    70→  empresaId: string,
+    71→  fechaInicio: Date | null,
+    72→  fechaFin: Date,
+    73→) {
+    74→  const where: any = {
+    75→    empresaId,
+    76→    comprobante: { estado: "contabilizado" },
+    77→    fecha: { lte: endOfDay(fechaFin) },
+    78→  };
+    79→  if (fechaInicio) {
+    80→    where.fecha.gte = startOfDay(fechaInicio);
+    81→  }
+    82→  return db.movimientoContable.findMany({
+    83→    where,
+    84→    include: {
+    85→      cuenta: {
+    86→        select: {
+    87→          codigo: true,
+    88→          nombre: true,
+    89→          naturaleza: true,
+    90→          nivel: true,
+    91→          esMovimiento: true,
+    92→        },
+    93→      },
+    94→    },
+    95→    orderBy: { fecha: "asc" },
+    96→  });
+    97→}
+    98→
+    99→// ============================================================
+   100→// TIPOS DE SALIDA
+   101→// ============================================================
+   102→
+   103→export type ESFLine = SaldoLine;
+   104→export interface ESFSection {
+   105→  total: number;
+   106→  lineas: SaldoLine[];
+   107→}
+   108→export interface ESFResult {
+   109→  fechaFin: string;
+   110→  empresaId: string;
+   111→  activo: {
+   112→    corriente: ESFSection;
+   113→    no_corriente: ESFSection;
+   114→    inventarios: ESFSection;
+   115→    clientes: ESFSection;
+   116→    efectivo: ESFSection;
+   117→    total: number;
+   118→  };
+   119→  pasivo: {
+   120→    corriente: ESFSection;
+   121→    no_corriente: ESFSection;
+   122→    total: number;
+   123→  };
+   124→  patrimonio: ESFSection & { utilidadPeriodo: number };
+   125→  totalActivo: number;
+   126→  totalPasivoPatrimonio: number;
+   127→  diferencia: number;
+   128→}
+   129→
+   130→export type EERLine = SaldoLine;
+   131→export interface EERResult {
+   132→  fechaInicio: string;
+   133→  fechaFin: string;
+   134→  empresaId: string;
+   135→  ingresos: SaldoLine[];
+   136→  costosVenta: SaldoLine[];
+   137→  gastosAdmin: SaldoLine[];
+   138→  costosProduccion: SaldoLine[];
+   139→  otrosIngresos: SaldoLine[];
+   140→  otrosGastos: SaldoLine[];
+   141→  totalIngresos: number;
+   142→  totalCostosVenta: number;
+   143→  totalGastosAdmin: number;
+   144→  totalCostosProduccion: number;
+   145→  totalOtrosIngresos: number;
+   146→  totalOtrosGastos: number;
+   147→  utilidadBruta: number;
+   148→  utilidadOperativa: number;
+   149→  utilidadAntesImpuestos: number;
+   150→  impuestoRenta: number;
+   151→  utilidadNeta: number;
+   152→}
+   153→
+   154→export interface ECPMovimiento {
+   155→  concepto: string;
+   156→  categoria: string;
+   157→  monto: number;
+   158→}
+   159→export interface ECPResult {
+   160→  fechaInicio: string;
+   161→  fechaFin: string;
+   162→  empresaId: string;
+   163→  saldoInicialPatrimonio: number;
+   164→  aumentos: ECPMovimiento[];
+   165→  reducciones: ECPMovimiento[];
+   166→  utilidadNetaPeriodo: number;
+   167→  dividendos: number;
+   168→  saldoFinalPatrimonio: number;
+   169→}
+   170→
+   171→export interface EFELinea {
+   172→  concepto: string;
+   173→  monto: number;
+   174→}
+   175→export interface EFEResult {
+   176→  fechaInicio: string;
+   177→  fechaFin: string;
+   178→  empresaId: string;
+   179→  utilidadNeta: number;
+   180→  ajustesNoCaja: EFELinea[];
+   181→  flujosOperacion: EFELinea[];
+   182→  flujosInversion: EFELinea[];
+   183→  flujosFinanciacion: EFELinea[];
+   184→  totalOperacion: number;
+   185→  totalInversion: number;
+   186→  totalFinanciacion: number;
+   187→  aumentoNetoEfectivo: number;
+   188→  saldoInicial: number;
+   189→  saldoFinal: number;
+   190→}
+   191→
+   192→export interface NotasNIIFResult {
+   193→  fechaFin: string;
+   194→  empresaId: string;
+   195→  basePreparacion: string;
+   196→  monedaFuncional: string;
+   197→  politicasContables: { titulo: string; descripcion: string }[];
+   198→  riesgos: { tipo: string; descripcion: string }[];
+   199→  eventosPosteriores: string;
+   200→  firmaContador: string;
+   201→}
+   202→
+   203→// ============================================================
+   204→// 1. ESTADO DE SITUACIÓN FINANCIERA (ESF) — Balance General NIIF
+   205→// ============================================================
+   206→
+   207→export async function generarESF(
+   208→  empresaId: string,
+   209→  fechaFin: string | Date,
+   210→): Promise<ESFResult> {
+   211→  const fechaFinDate = endOfDay(toDate(fechaFin));
+   212→  const movs = await cargarMovimientos(empresaId, null, fechaFinDate);
+   213→  const saldos = agruparSaldosPorCategoria(movs);
+   214→
+   215→  // Construir secciones
+   216→  const seccion = (cat: NIIFCategory): ESFSection => ({
+   217→    lineas: saldos[cat] ?? [],
+   218→    total: sumarSaldos(saldos[cat]),
+   219→  });
+   220→
+   221→  const activo_corriente = seccion("activo_corriente");
+   222→  const activo_no_corriente = seccion("activo_no_corriente");
+   223→  const inventarios = seccion("inventarios");
+   224→  const clientes = seccion("clientes");
+   225→  const efectivo = seccion("efectivo");
+   226→
+   227→  const totalActivo = round(
+   228→    activo_corriente.total +
+   229→      activo_no_corriente.total +
+   230→      inventarios.total +
+   231→      clientes.total +
+   232→      efectivo.total,
+   233→    2,
+   234→  );
+   235→
+   236→  const pasivo_corriente = seccion("pasivo_corriente");
+   237→  const pasivo_no_corriente = seccion("pasivo_no_corriente");
+   238→  const totalPasivo = round(
+   239→    pasivo_corriente.total + pasivo_no_corriente.total,
+   240→    2,
+   241→  );
+   242→
+   243→  // Patrimonio = saldo cuentas clase 3 + utilidad neta del período
+   244→  // (la utilidad neta se incorpora al patrimonio del ESF)
+   245→  const patrimonioSeccion = seccion("patrimonio");
+   246→
+   247→  // Calcular utilidad del período (desde inicio de año hasta fechaFin)
+   248→  const inicioAnio = new Date(fechaFinDate.getFullYear(), 0, 1);
+   249→  const movsAnio = await cargarMovimientos(empresaId, inicioAnio, fechaFinDate);
+   250→  const saldosAnio = agruparSaldosPorCategoria(movsAnio);
+   251→  const ingresos = sumarSaldos(saldosAnio["ingresos"]) + sumarSaldos(saldosAnio["otros_ingresos"]);
+   252→  const costosVenta = sumarSaldos(saldosAnio["costos_venta"]);
+   253→  const costosProduccion = sumarSaldos(saldosAnio["costos_produccion"]);
+   254→  const gastosAdmin = sumarSaldos(saldosAnio["gastos_admin"]);
+   255→  const otrosGastos = sumarSaldos(saldosAnio["otros_gastos"]);
+   256→  const utilidadAntesImpuestos = round(
+   257→    ingresos - costosVenta - costosProduccion - gastosAdmin - otrosGastos,
+   258→    2,
+   259→  );
+   260→  const impuestoRenta = round(Math.max(0, utilidadAntesImpuestos) * TASA_IMPUESTO_RENTA, 2);
+   261→  const utilidadPeriodo = round(utilidadAntesImpuestos - impuestoRenta, 2);
+   262→
+   263→  // Patrimonio total = saldo cuentas clase 3 (incluye capital + utilidades acumuladas
+   264→  // registradas como cuentas patrimonio, exluyendo resultado del período si ya está
+   265→  // contabilizado como cuenta 3605/36xx). Aquí incluimos utilidadPeriodo aparte para
+   266→  // que cuadre con la ecuación Activo = Pasivo + Patrimonio.
+   267→  const patrimonioTotal = round(patrimonioSeccion.total + utilidadPeriodo, 2);
+   268→
+   269→  const totalPasivoPatrimonio = round(totalPasivo + patrimonioTotal, 2);
+   270→  const diferencia = round(totalActivo - totalPasivoPatrimonio, 2);
+   271→
+   272→  return {
+   273→    fechaFin: fechaFinDate.toISOString(),
+   274→    empresaId,
+   275→    activo: {
+   276→      corriente: activo_corriente,
+   277→      no_corriente: activo_no_corriente,
+   278→      inventarios,
+   279→      clientes,
+   280→      efectivo,
+   281→      total: totalActivo,
+   282→    },
+   283→    pasivo: {
+   284→      corriente: pasivo_corriente,
+   285→      no_corriente: pasivo_no_corriente,
+   286→      total: totalPasivo,
+   287→    },
+   288→    patrimonio: {
+   289→      ...patrimonioSeccion,
+   290→      utilidadPeriodo,
+   291→    },
+   292→    totalActivo,
+   293→    totalPasivoPatrimonio,
+   294→    diferencia,
+   295→  };
+   296→}
+   297→
+   298→// ============================================================
+   299→// 2. ESTADO DE RESULTADO INTEGRAL (EER)
+   300→// ============================================================
+   301→
+   302→export async function generarEER(
+   303→  empresaId: string,
+   304→  fechaInicio: string | Date,
+   305→  fechaFin: string | Date,
+   306→): Promise<EERResult> {
+   307→  const inicio = startOfDay(toDate(fechaInicio));
+   308→  const fin = endOfDay(toDate(fechaFin));
+   309→  const movs = await cargarMovimientos(empresaId, inicio, fin);
+   310→  const saldos = agruparSaldosPorCategoria(movs);
+   311→
+   312→  const ingresos = saldos["ingresos"] ?? [];
+   313→  const costosVenta = saldos["costos_venta"] ?? [];
+   314→  const gastosAdmin = saldos["gastos_admin"] ?? [];
+   315→  const costosProduccion = saldos["costos_produccion"] ?? [];
+   316→  const otrosIngresos = saldos["otros_ingresos"] ?? [];
+   317→  const otrosGastos = saldos["otros_gastos"] ?? [];
+   318→
+   319→  const totalIngresos = sumarSaldos(ingresos);
+   320→  const totalCostosVenta = sumarSaldos(costosVenta);
+   321→  const totalGastosAdmin = sumarSaldos(gastosAdmin);
+   322→  const totalCostosProduccion = sumarSaldos(costosProduccion);
+   323→  const totalOtrosIngresos = sumarSaldos(otrosIngresos);
+   324→  const totalOtrosGastos = sumarSaldos(otrosGastos);
+   325→
+   326→  const utilidadBruta = round(totalIngresos - totalCostosVenta, 2);
+   327→  const utilidadOperativa = round(
+   328→    utilidadBruta - totalGastosAdmin - totalCostosProduccion,
+   329→    2,
+   330→  );
+   331→  const utilidadAntesImpuestos = round(
+   332→    utilidadOperativa + totalOtrosIngresos - totalOtrosGastos,
+   333→    2,
+   334→  );
+   335→  const impuestoRenta = round(
+   336→    Math.max(0, utilidadAntesImpuestos) * TASA_IMPUESTO_RENTA,
+   337→    2,
+   338→  );
+   339→  const utilidadNeta = round(utilidadAntesImpuestos - impuestoRenta, 2);
+   340→
+   341→  return {
+   342→    fechaInicio: inicio.toISOString(),
+   343→    fechaFin: fin.toISOString(),
+   344→    empresaId,
+   345→    ingresos,
+   346→    costosVenta,
+   347→    gastosAdmin,
+   348→    costosProduccion,
+   349→    otrosIngresos,
+   350→    otrosGastos,
+   351→    totalIngresos,
+   352→    totalCostosVenta,
+   353→    totalGastosAdmin,
+   354→    totalCostosProduccion,
+   355→    totalOtrosIngresos,
+   356→    totalOtrosGastos,
+   357→    utilidadBruta,
+   358→    utilidadOperativa,
+   359→    utilidadAntesImpuestos,
+   360→    impuestoRenta,
+   361→    utilidadNeta,
+   362→  };
+   363→}
+   364→
+   365→// ============================================================
+   366→// 3. ESTADO DE CAMBIOS EN EL PATRIMONIO (ECP)
+   367→// ============================================================
+   368→
+   369→export async function generarECP(
+   370→  empresaId: string,
+   371→  fechaInicio: string | Date,
+   372→  fechaFin: string | Date,
+   373→): Promise<ECPResult> {
+   374→  const inicio = startOfDay(toDate(fechaInicio));
+   375→  const fin = endOfDay(toDate(fechaFin));
+   376→
+   377→  // Saldo inicial de patrimonio: saldos hasta un día antes de fechaInicio
+   378→  const diaAntes = new Date(inicio.getTime() - 86400000);
+   379→  const movsIniciales = await cargarMovimientos(empresaId, null, endOfDay(diaAntes));
+   380→  const saldosIniciales = agruparSaldosPorCategoria(movsIniciales);
+   381→  const saldoInicialPatrimonio = sumarSaldos(saldosIniciales["patrimonio"]);
+   382→
+   383→  // Movimientos del período en cuentas de patrimonio (clase 3)
+   384→  const movsPeriodo = await cargarMovimientos(empresaId, inicio, fin);
+   385→  const movsPatrimonio = movsPeriodo.filter(
+   386→    (m) => mapCuentaPUCtoNIIF(m.cuenta?.codigo ?? "") === "patrimonio",
+   387→  );
+   388→
+   389→  const aumentos: ECPMovimiento[] = [];
+   390→  const reducciones: ECPMovimiento[] = [];
+   391→
+   392→  // Agrupar por cuenta de patrimonio
+   393→  const porCuentaPat: Record<string, { codigo: string; nombre: string; neto: number }> = {};
+   394→  for (const m of movsPatrimonio) {
+   395→    const codigo = m.cuenta?.codigo ?? "?";
+   396→    const nombre = m.cuenta?.nombre ?? "—";
+   397→    if (!porCuentaPat[codigo]) porCuentaPat[codigo] = { codigo, nombre, neto: 0 };
+   398→    // Patrimonio naturaleza crédito: aumentos = crédito
+   399→    const naturaleza = m.cuenta?.naturaleza ?? "credito";
+   400→    if (naturaleza === "credito") {
+   401→      porCuentaPat[codigo].neto += Number(m.credito ?? 0) - Number(m.debito ?? 0);
+   402→    } else {
+   403→      porCuentaPat[codigo].neto += Number(m.debito ?? 0) - Number(m.credito ?? 0);
+   404→    }
+   405→  }
+   406→  for (const c of Object.values(porCuentaPat)) {
+   407→    const monto = round(c.neto, 2);
+   408→    if (monto > 0) {
+   409→      aumentos.push({ concepto: `${c.codigo} - ${c.nombre}`, categoria: "Capital/Aportes", monto });
+   410→    } else if (monto < 0) {
+   411→      reducciones.push({ concepto: `${c.codigo} - ${c.nombre}`, categoria: "Retiros/Reducciones", monto: Math.abs(monto) });
+   412→    }
+   413→  }
+   414→
+   415→  // Utilidad neta del período (incrementa patrimonio)
+   416→  const eer = await generarEER(empresaId, inicio, fin);
+   417→  const utilidadNetaPeriodo = eer.utilidadNeta;
+   418→
+   419→  // Dividendos: buscar movimientos en cuentas de patrimonio tipo 3605 (dividendos)
+   420→  // o cualquier movimiento débito en cuentas 36xx que represente distribución
+   421→  let dividendos = 0;
+   422→  for (const m of movsPatrimonio) {
+   423→    const codigo = m.cuenta?.codigo ?? "";
+   424→    // 3605 = Dividendos decretados (PUC)
+   425→    if (codigo.startsWith("3605") || codigo.startsWith("3606") || codigo.startsWith("3615")) {
+   426→      dividendos += Number(m.debito ?? 0) - Number(m.credito ?? 0);
+   427→    }
+   428→  }
+   429→  dividendos = round(Math.abs(dividendos), 2);
+   430→
+   431→  const saldoFinalPatrimonio = round(
+   432→    saldoInicialPatrimonio + utilidadNetaPeriodo - dividendos,
+   433→    2,
+   434→  );
+   435→
+   436→  return {
+   437→    fechaInicio: inicio.toISOString(),
+   438→    fechaFin: fin.toISOString(),
+   439→    empresaId,
+   440→    saldoInicialPatrimonio,
+   441→    aumentos,
+   442→    reducciones,
+   443→    utilidadNetaPeriodo,
+   444→    dividendos,
+   445→    saldoFinalPatrimonio,
+   446→  };
+   447→}
+   448→
+   449→// ============================================================
+   450→// 4. ESTADO DE FLUJOS DE EFECTIVO (EFE) — método indirecto
+   451→// ============================================================
+   452→
+   453→export async function generarEFE(
+   454→  empresaId: string,
+   455→  fechaInicio: string | Date,
+   456→  fechaFin: string | Date,
+   457→): Promise<EFEResult> {
+   458→  const inicio = startOfDay(toDate(fechaInicio));
+   459→  const fin = endOfDay(toDate(fechaFin));
+   460→
+   461→  // Utilidad neta del período
+   462→  const eer = await generarEER(empresaId, inicio, fin);
+   463→  const utilidadNeta = eer.utilidadNeta;
+   464→
+   465→  // Saldos finales vs iniciales para deltas
+   466→  const movsPeriodo = await cargarMovimientos(empresaId, inicio, fin);
+   467→  const saldosPeriodo = agruparSaldosPorCategoria(movsPeriodo);
+   468→
+   469→  // Saldo inicial de efectivo (cuentas 1105/1110/1115)
+   470→  const diaAntes = new Date(inicio.getTime() - 86400000);
+   471→  const movsIniciales = await cargarMovimientos(empresaId, null, endOfDay(diaAntes));
+   472→  const saldosIniciales = agruparSaldosPorCategoria(movsIniciales);
+   473→  const saldoInicial = sumarSaldos(saldosIniciales["efectivo"]);
+   474→
+   475→  // Saldo final de efectivo
+   476→  const movsFinales = await cargarMovimientos(empresaId, null, fin);
+   477→  const saldosFinales = agruparSaldosPorCategoria(movsFinales);
+   478→  const saldoFinal = sumarSaldos(saldosFinales["efectivo"]);
+   479→
+   480→  // Ajustes no-caja (partidas del EER que no son efectivo):
+   481→  // Aquí usamos aproximación: cualquier gasto/costo que NO haya afectado efectivo
+   482→  // se considera "no-caja". Para simplificar, mostramos:
+   483→  // - Depreciación/amortización: cuentas 1610/1615/1620 (P, P y E - depreciaciones)
+   484→  //   y 1690 (Flotantes), 1810/1820 (Diferidos amortizables), 5150/5160
+   485→  //   (cuotas de amortización)
+   486→  // En la práctica, depuramos por categoría NIIF.
+   487→  const ajustesNoCaja: EFELinea[] = [];
+   488→
+   489→  // Depreciaciones del período (cuentas clase 16 acumulada — crédito)
+   490→  // En PUC: 1619XX Depreciación acumulada es cuenta de crédito
+   491→  // Si hay movimientos de "activo_no_corriente" en el período con saldo neto negativo,
+   492→  // es probable que sea por depreciación.
+   493→  const deltaActivoNoCorriente =
+   494→    sumarSaldos(saldosPeriodo["activo_no_corriente"]);
+   495→  if (Math.abs(deltaActivoNoCorriente) > 0.01) {
+   496→    ajustesNoCaja.push({
+   497→      concepto: "Variación neta propiedades, planta y equipos / activos intangibles",
+   498→      monto: deltaActivoNoCorriente,
+   499→    });
+   500→  }
+   501→
+   502→  // Variación de capital de trabajo operativo:
+   503→  const deltaClientes =
+   504→    sumarSaldos(saldosPeriodo["clientes"]);
+   505→  const deltaInventarios =
+   506→    sumarSaldos(saldosPeriodo["inventarios"]);
+   507→  const deltaPasivoCorriente =
+   508→    sumarSaldos(saldosPeriodo["pasivo_corriente"]);
+   509→
+   510→  const flujosOperacion: EFELinea[] = [];
+   511→  flujosOperacion.push({ concepto: "Utilidad neta del período", monto: utilidadNeta });
+   512→  for (const a of ajustesNoCaja) {
+   513→    flujosOperacion.push({ concepto: a.concepto, monto: a.monto });
+   514→  }
+   515→  // Variaciones de capital de trabajo (signo invertido según método indirecto)
+   516→  if (Math.abs(deltaClientes) > 0.01) {
+   517→    flujosOperacion.push({
+   518→      concepto: "(Disminución) aumento de clientes / cuentas por cobrar",
+   519→      monto: -deltaClientes,
+   520→    });
+   521→  }
+   522→  if (Math.abs(deltaInventarios) > 0.01) {
+   523→    flujosOperacion.push({
+   524→      concepto: "(Aumento) disminución de inventarios",
+   525→      monto: -deltaInventarios,
+   526→    });
+   527→  }
+   528→  if (Math.abs(deltaPasivoCorriente) > 0.01) {
+   529→    flujosOperacion.push({
+   530→      concepto: "Aumento (disminución) de pasivos corrientes",
+   531→      monto: deltaPasivoCorriente,
+   532→    });
+   533→  }
+   534→
+   535→  const totalOperacion = round(
+   536→    flujosOperacion.reduce((a, b) => a + b.monto, 0),
+   537→    2,
+   538→  );
+   539→
+   540→  // Flujos de inversión: movimientos en cuentas de activo no corriente que
+   541→  // sí afectan efectivo (compras/ventas de P y E, intangibles, inversiones LP)
+   542→  // Para simplificar: invertimos el signo del delta de activo_no_corriente (excluyendo
+   543→  // la depreciación que ya está en ajustes no-caja).
+   544→  const flujosInversion: EFELinea[] = [];
+   545→  // Compras de propiedades planta y equipo (débitos en cuentas 16xx con PUC 16xx en propiedad planta)
+   546→  const movsInv = movsPeriodo.filter(
+   547→    (m) =>
+   548→      (m.cuenta?.codigo ?? "").startsWith("16") ||
+   549→      (m.cuenta?.codigo ?? "").startsWith("17") ||
+   550→      (m.cuenta?.codigo ?? "").startsWith("18"),
+   551→  );
+   552→  let inversiones = 0;
+   553→  for (const m of movsInv) {
+   554→    const naturaleza = m.cuenta?.naturaleza ?? "debito";
+   555→    if (naturaleza === "debito") {
+   556→      inversiones += Number(m.debito ?? 0) - Number(m.credito ?? 0);
+   557→    } else {
+   558→      inversiones += Number(m.credito ?? 0) - Number(m.debito ?? 0);
+   559→    }
+   560→  }
+   561→  if (Math.abs(inversiones) > 0.01) {
+   562→    flujosInversion.push({
+   563→      concepto: "Compra de propiedades, planta, equipos e intangibles",
+   564→      monto: -Math.abs(inversiones),
+   565→    });
+   566→  }
+   567→  const totalInversion = round(
+   568→    flujosInversion.reduce((a, b) => a + b.monto, 0),
+   569→    2,
+   570→  );
+   571→
+   572→  // Flujos de financiación: préstamos recibidos (cuentas 21xx, 25xx) y capital recibido
+   573→  const flujosFinanciacion: EFELinea[] = [];
+   574→  // Movimientos de obligaciones financieras (21) y obligaciones laborales (25/26)
+   575→  const movsFin = movsPeriodo.filter(
+   576→    (m) =>
+   577→      (m.cuenta?.codigo ?? "").startsWith("21") ||
+   578→      (m.cuenta?.codigo ?? "").startsWith("25") ||
+   579→      (m.cuenta?.codigo ?? "").startsWith("26") ||
+   580→      (m.cuenta?.codigo ?? "").startsWith("3"),
+   581→  );
+   582→  // Simplificación: solo movimientos en cuentas 21xx (obligaciones financieras)
+   583→  let prestamos = 0;
+   584→  for (const m of movsFin) {
+   585→    const codigo = m.cuenta?.codigo ?? "";
+   586→    if (codigo.startsWith("21")) {
+   587→      const naturaleza = m.cuenta?.naturaleza ?? "credito";
+   588→      if (naturaleza === "credito") {
+   589→        prestamos += Number(m.credito ?? 0) - Number(m.debito ?? 0);
+   590→      } else {
+   591→        prestamos += Number(m.debito ?? 0) - Number(m.credito ?? 0);
+   592→      }
+   593→    }
+   594→  }
+   595→  if (Math.abs(prestamos) > 0.01) {
+   596→    flujosFinanciacion.push({
+   597→      concepto: "Préstamos obtenidos (neto)",
+   598→      monto: prestamos,
+   599→    });
+   600→  }
+   601→  // Aportes de capital (cuenta 3105 - capital social)
+   602→  let aportes = 0;
+   603→  for (const m of movsFin) {
+   604→    const codigo = m.cuenta?.codigo ?? "";
+   605→    if (codigo.startsWith("31") || codigo.startsWith("32")) {
+   606→      const naturaleza = m.cuenta?.naturaleza ?? "credito";
+   607→      if (naturaleza === "credito") {
+   608→        aportes += Number(m.credito ?? 0) - Number(m.debito ?? 0);
+   609→      }
+   610→    }
+   611→  }
+   612→  if (Math.abs(aportes) > 0.01) {
+   613→    flujosFinanciacion.push({ concepto: "Aportes de capital", monto: aportes });
+   614→  }
+   615→  // Dividendos pagados
+   616→  let dividendos = 0;
+   617→  for (const m of movsFin) {
+   618→    const codigo = m.cuenta?.codigo ?? "";
+   619→    if (codigo.startsWith("36")) {
+   620→      dividendos += Number(m.debito ?? 0) - Number(m.credito ?? 0);
+   621→    }
+   622→  }
+   623→  if (Math.abs(dividendos) > 0.01) {
+   624→    flujosFinanciacion.push({
+   625→      concepto: "Dividendos pagados",
+   626→      monto: -Math.abs(dividendos),
+   627→    });
+   628→  }
+   629→  const totalFinanciacion = round(
+   630→    flujosFinanciacion.reduce((a, b) => a + b.monto, 0),
+   631→    2,
+   632→  );
+   633→
+   634→  const aumentoNetoEfectivo = round(
+   635→    totalOperacion + totalInversion + totalFinanciacion,
+   636→    2,
+   637→  );
+   638→
+   639→  return {
+   640→    fechaInicio: inicio.toISOString(),
+   641→    fechaFin: fin.toISOString(),
+   642→    empresaId,
+   643→    utilidadNeta,
+   644→    ajustesNoCaja,
+   645→    flujosOperacion,
+   646→    flujosInversion,
+   647→    flujosFinanciacion,
+   648→    totalOperacion,
+   649→    totalInversion,
+   650→    totalFinanciacion,
+   651→    aumentoNetoEfectivo,
+   652→    saldoInicial,
+   653→    saldoFinal,
+   654→  };
+   655→}
+   656→
+   657→// ============================================================
+   658→// 5. NOTAS A LOS ESTADOS FINANCIEROS
+   659→// ============================================================
+   660→
+   661→export async function generarNotasNIIF(
+   662→  empresaId: string,
+   663→  fechaFin: string | Date,
+   664→): Promise<NotasNIIFResult> {
+   665→  const fin = endOfDay(toDate(fechaFin));
+   666→  const empresa = await db.empresa.findUnique({
+   667→    where: { id: empresaId },
+   668→    select: {
+   669→      razonSocial: true,
+   670→      nit: true,
+   671→      moneda: true,
+   672→      regimenTributario: true,
+   673→    },
+   674→  });
+   675→
+   676→  return {
+   677→    fechaFin: fin.toISOString(),
+   678→    empresaId,
+   679→    basePreparacion:
+   680→      "Los estados financieros consolidados se preparan de acuerdo con las Normas Internacionales de Información Financiera (NIIF/IFRS) emitidas por el IASB. Se presentan en pesos colombianos (COP), redondeados al peso más cercano. La base de medición utilizada es el costo histórico, salvo para aquellos activos/pass que se miden a valor razonable conforme a las NIIF correspondientes.",
+   681→    monedaFuncional: empresa?.moneda ?? "COP",
+   682→    politicasContables: [
+   683→      {
+   684→        titulo: "1. Reconocimiento de ingresos",
+   685→        descripcion:
+   686→          "Los ingresos por venta de bienes se reconocen cuando se transfieren los riesgos y beneficios al cliente, conforme a la NIC 18 / NIIF 15. Los ingresos por servicios se reconocen según el grado de avance de la transacción.",
+   687→      },
+   688→      {
+   689→        titulo: "2. Propiedades, planta y equipo",
+   690→        descripcion:
+   691→          "Los activos fijos se registran al costo de adquisición menos depreciación acumulada. La depreciación se calcula por el método de línea recta sobre la vida útil estimada de cada activo, conforme a la NIC 16.",
+   692→      },
+   693→      {
+   694→        titulo: "3. Inventarios",
+   695→        descripcion:
+   696→          "Los inventarios se valoran al costo (PEPS) o al valor neto de realización, el menor, conforme a la NIC 2. Los costos incluyen compra, transformación y otros costos necesarios para poner los inventarios en su ubicación y condición actuales.",
+   697→      },
+   698→      {
+   699→        titulo: "4. Cuentas por cobrar",
+   700→        descripcion:
+   701→          "Las cuentas por cobrar se registran al valor nominal. Se reconoce una provisión para cartera de difícil cobro basada en análisis de antigüedad y experiencia histórica.",
+   702→      },
+   703→      {
+   704→        titulo: "5. Pasivos laborales",
+   705→        descripcion:
+   706→          "Los pasivos por prestaciones sociales (cesantías, intereses, primas, vacaciones) se causan conforme a la legislación colombiana y la NIC 19, considerando la probabilidad de pago y el valor presente cuando aplique.",
+   707→      },
+   708→      {
+   709→        titulo: "6. Impuesto de renta",
+   710→        descripcion:
+   711→          "El impuesto de renta se calcula a la tarifa vigente del 33% sobre la utilidad antes de impuestos, ajustada por diferencias temporales y permanentes conforme a la NIC 12.",
+   712→      },
+   713→    ],
+   714→    riesgos: [
+   715→      {
+   716→        tipo: "Riesgo de mercado",
+   717→        descripcion:
+   718→          "La empresa está expuesta a fluctuaciones en el valor de la inversión en inventarios y a variaciones en las tasas de interés sobre obligaciones financieras.",
+   719→      },
+   720→      {
+   721→        tipo: "Riesgo de crédito",
+   722→        descripcion:
+   723→          "Las cuentas por cobrar están concentradas en un portafolio de clientes. Se mantiene provisión para cartera de difícil cobro.",
+   724→      },
+   725→      {
+   726→        tipo: "Riesgo de liquidez",
+   727→        descripcion:
+   728→          "La empresa mantiene líneas de crédito disponibles y un nivel adecuado de efectivo para cubrir obligaciones de corto plazo.",
+   729→      },
+   730→      {
+   731→        tipo: "Riesgo operativo",
+   732→        descripcion:
+   733→          "Asociado a la dependencia de personal clave, procesos internos y sistemas de información.",
+   734→      },
+   735→    ],
+   736→    eventosPosteriores:
+   737→      "No se han identificado eventos posteriores significativos que requieran ajuste o revelación en los estados financieros entre la fecha de corte y la fecha de emisión del informe.",
+   738→    firmaContador:
+   739→      "Revisado y firmado por el contador público adscrito, conforme al Decreto 0266 de 2013 (Colombia) y normas internacionales de información financiera aplicables.",
+   740→  };
+   741→}
+   742→

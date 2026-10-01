@@ -90,6 +90,11 @@ export const PUC_TO_NIIF: Record<string, NIIFCategory> = {
   "1630": "activo_no_corriente",
   "1635": "activo_no_corriente",
   "1640": "activo_no_corriente",
+  // 169X - Depreciación acumulada (contra-activo, naturaleza crédito).
+  // Aunque tiene naturaleza crédito, sigue siendo activo no corriente
+  // (reduce P&E). Antes caía al fallback "1" → activo_corriente (incorrecto).
+  "1690": "activo_no_corriente",
+  "1695": "activo_no_corriente",
   // 17 - Deudores varios / largo plazo
   "1705": "activo_no_corriente",
   // 18 - Intangibles
@@ -129,19 +134,34 @@ export const PUC_TO_NIIF: Record<string, NIIFCategory> = {
   "2415": "pasivo_corriente",
   "2420": "pasivo_corriente",
   "2425": "pasivo_corriente",
-  // 25 - Obligaciones laborales (largo plazo: cesantías, pensiones)
-  "2505": "pasivo_no_corriente",
+  // 25 - Obligaciones laborales
+  // IMPORTANTE: en PUC colombiano, las cuentas "por pagar" (corrientes) son
+  // distintas de las "provisiones consolidadas" (largo plazo) que están en
+  // la clase 26. Las de clase 25 que se pagan dentro del año son corrientes:
+  //   2505 = Salarios por pagar        (CORRIENTE)
+  //   2510 = Cesantías por pagar       (no corriente — prestación social LP)
+  //   2515 = Intereses cesantías por pagar (no corriente)
+  //   2520 = Prima de servicios por pagar (CORRIENTE — se paga en el año)
+  //   2525 = Vacaciones por pagar       (CORRIENTE — se pagan en el año)
+  //   2530 = Pensiones de jubilación    (no corriente)
+  //   2535 = Otras prestaciones          (no corriente)
+  "2505": "pasivo_corriente",
   "2510": "pasivo_no_corriente",
   "2515": "pasivo_no_corriente",
-  "2520": "pasivo_no_corriente",
-  "2525": "pasivo_no_corriente",
+  "2520": "pasivo_corriente",
+  "2525": "pasivo_corriente",
   "2530": "pasivo_no_corriente",
   "2535": "pasivo_no_corriente",
-  // 26 - Pasivos estimados / provisiones
+  // 26 - Pasivos estimados / provisiones (largo plazo)
+  // Las provisiones consolidadas (2610/2615/2620/2625) son NO corrientes
+  // porque representan prestaciones sociales causadas pero no pagables
+  // a corto plazo. Antes la 2625 faltaba en la tabla y caía al fallback
+  // "2" → pasivo_corriente (incorrecto).
   "2605": "pasivo_no_corriente",
   "2610": "pasivo_no_corriente",
   "2615": "pasivo_no_corriente",
   "2620": "pasivo_no_corriente",
+  "2625": "pasivo_no_corriente",
   // 27 - Diferidos pasivo
   "2705": "pasivo_no_corriente",
   "2710": "pasivo_no_corriente",

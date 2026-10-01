@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+// Force HMR refresh — touch marker for radian module loader.
+
 declare global {
   var __db: PrismaClient | undefined;
   var __dbSchemaHash: string | undefined;
@@ -67,6 +69,11 @@ function hasAllModels(client: PrismaClient | undefined): boolean {
     "detalleServicioTecnico",
     "vehiculo",
     "mascota",
+    "ordenProduccion",
+    "detalleOrdenProduccion",
+    "recetaProducto",
+    "recetaIngrediente",
+    "eventoRadian",
   ];
   return required.every((m) => (client as any)[m] !== undefined);
 }

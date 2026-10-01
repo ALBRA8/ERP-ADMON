@@ -1677,3 +1677,108 @@ model AuditoriaMultiTenant {
   @@index([empresaId, createdAt])
   @@index([userId, createdAt])
 }
+
+// ============================================================
+// FASE 5 — Producción/Costos + DIAN Radian + Cierre Hermes §5.7 y §5.5
+// ============================================================
+
+// ---------- Costos / Órdenes de Producción (Hermes §5.7) ----------
+
+model OrdenProduccion {
+  id                    String                   @id @default(cuid())
+  empresaId             String
+  numero                String // PROD-2026-0001
+  fechaInicio           DateTime                 @default(now())
+  fechaFin              DateTime?
+  estado                String                   @default("borrador") // borrador | en_proceso | finalizada | anulada
+  productoResultanteId  String? // producto terminado a obtener
+  cantidadProducir      Float
+  cantidadProducida     Float                    @default(0)
+  // Costos
+  costoMateriaPrima     Float                    @default(0)
+  costoManoObra         Float                    @default(0)
+  costoIndirectos       Float                    @default(0)
+  costoTotal            Float                    @default(0)
+  costoUnitario         Float                    @default(0)
+  // Comprobante contable
+  comprobanteContableId String?
+  observaciones         String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  detalles              DetalleOrdenProduccion[]
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, estado])
+}
+
+model DetalleOrdenProduccion {
+  id            String          @id @default(cuid())
+  ordenId       String
+  orden         OrdenProduccion @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  empresaId     String
+  tipo          String // materia_prima | mano_obra | costo_indirecto
+  productoId    String? // si es materia prima
+  descripcion   String
+  cantidad      Float           @default(1)
+  costoUnitario Float
+  subtotal      Float
+  createdAt     DateTime        @default(now())
+
+  @@index([ordenId])
+}
+
+model RecetaProducto {
+  id           String              @id @default(cuid())
+  empresaId    String
+  productoId   String?
+  nombre       String
+  descripcion  String?
+  rendimiento  Float               @default(1) // 1 kg materia prima -> 0.85 kg producto terminado
+  activa       Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  ingredientes RecetaIngrediente[]
+
+  @@index([empresaId, productoId])
+}
+
+model RecetaIngrediente {
+  id            String         @id @default(cuid())
+  recetaId      String
+  receta        RecetaProducto @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+  empresaId     String
+  productoId    String? // materia prima
+  descripcion   String
+  cantidad      Float // cantidad por 1 unidad de producto terminado
+  costoUnitario Float          @default(0)
+  subtotal      Float          @default(0) // calculado: cantidad * costo
+  createdAt     DateTime       @default(now())
+
+  @@index([recetaId])
+}
+
+// ---------- DIAN Radian (Hermes §5.5) ----------
+
+model EventoRadian {
+  id              String   @id @default(cuid())
+  empresaId       String
+  numero          String // RAD-2026-0001
+  facturaCompraId String? // factura electrónica recibida
+  tipo            String // 030=acuse_recibo | 031=recibo_bien | 032=rechazo | 033=transferencia
+  fecha           DateTime @default(now())
+  terceroId       String?
+  nitEmisor       String // NIT del proveedor
+  cufeFactura     String // CUFE de la factura electrónica recibida
+  // Respuesta DIAN
+  estado          String   @default("borrador") // borrador | enviado | aceptado | rechazado
+  xmlEvento       String? // XML UBL del evento
+  respuestaDIAN   String? // JSON respuesta
+  trackId         String?
+  mensajeError    String?
+  observaciones   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, tipo])
+  @@index([empresaId, estado])
+}

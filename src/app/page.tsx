@@ -18,6 +18,7 @@ import { ContabilidadView } from "@/components/contabilidad/contabilidad-view";
 import { CreditosView } from "@/components/creditos/creditos-view";
 import { PresupuestoView } from "@/components/presupuesto/presupuesto-view";
 import { DianView } from "@/components/dian/dian-view";
+import { RadianView } from "@/components/radian/radian-view";
 import { NominaView } from "@/components/nomina/nomina-view";
 import { ReportesView } from "@/components/reportes/reportes-view";
 import { BancosView } from "@/components/bancos/bancos-view";
@@ -32,6 +33,8 @@ import { TallerView } from "@/components/taller/taller-view";
 import { VehiculosView } from "@/components/vehiculos/vehiculos-view";
 import { NiifView } from "@/components/niif/niif-view";
 import { MediosView } from "@/components/medios-magneticos/medios-view";
+import { ImportacionesView } from "@/components/importaciones/importaciones-view";
+import { ProduccionView } from "@/components/produccion/produccion-view";
 import { AdminView } from "@/components/admin/admin-view";
 import { LoginView } from "@/components/auth/login-view";
 import { Sidebar, type NavKey } from "@/components/layout/sidebar";
@@ -51,6 +54,7 @@ type View =
   | "creditos"
   | "presupuesto"
   | "dian"
+  | "radian"
   | "nomina"
   | "reportes"
   | "bancos"
@@ -65,7 +69,9 @@ type View =
   | "cafetero"
   | "servicios"
   | "taller"
-  | "vehiculos";
+  | "vehiculos"
+  | "importaciones"
+  | "produccion";
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -138,6 +144,7 @@ export default function Home() {
           {view === "creditos" && <CreditosView />}
           {view === "presupuesto" && <PresupuestoView />}
           {view === "dian" && <DianView />}
+          {view === "radian" && <RadianView />}
           {view === "nomina" && <NominaView />}
           {view === "reportes" && <ReportesView />}
           {view === "bancos" && <BancosView />}
@@ -153,6 +160,8 @@ export default function Home() {
           {view === "servicios" && <ServiciosView />}
           {view === "taller" && <TallerView />}
           {view === "vehiculos" && <VehiculosView />}
+          {view === "importaciones" && <ImportacionesView />}
+          {view === "produccion" && <ProduccionView />}
         </main>
       </div>
       <Toaster />

@@ -477,25 +477,48 @@ export async function generarEFE(
   const saldosFinales = agruparSaldosPorCategoria(movsFinales);
   const saldoFinal = sumarSaldos(saldosFinales["efectivo"]);
 
-  // Ajustes no-caja (partidas del EER que no son efectivo):
-  // Aquí usamos aproximación: cualquier gasto/costo que NO haya afectado efectivo
-  // se considera "no-caja". Para simplificar, mostramos:
-  // - Depreciación/amortización: cuentas 1610/1615/1620 (P, P y E - depreciaciones)
-  //   y 1690 (Flotantes), 1810/1820 (Diferidos amortizables), 5150/5160
-  //   (cuotas de amortización)
-  // En la práctica, depuramos por categoría NIIF.
+  // Ajustes no-caja: partidas del EER que NO afectaron efectivo.
+  //
+  // Método indirecto NIC 7 — se parte de la utilidad neta y se ajustan:
+  //   1. Depreciación / amortización del período (gasto ya causado en EER pero
+  //      que no usa efectivo — la contrapartida es un contra-activo de naturaleza
+  //      crédito, p.ej. 1690 Depreciación acumulada).
+  //   2. Variación de pasivos no corrientes (provisiones consolidadas 26XX,
+  //      cesantías, pensiones por pagar LP, obligaciones financieras LP que
+  //      se causaron pero no se pagaron en el período). Representan gastos o
+  //      pasivos que ya están en EER o ESF pero no generaron salida de caja.
+  //
+  // BUG previo: se sumaba `deltaActivoNoCorriente` (NETO de compras +
+  // depreciación) como ajuste no-caja, Y A LA VEZ las compras se restaban en
+  // `flujosInversion` — doble conteo. Ahora separamos claramente:
+  //   - Depreciación (contra-activo crédito) → ajuste no-caja (suma).
+  //   - Compras de activos reales (debit naturaleza, débito > crédito) →
+  //     inversión (egreso).
   const ajustesNoCaja: EFELinea[] = [];
 
-  // Depreciaciones del período (cuentas clase 16 acumulada — crédito)
-  // En PUC: 1619XX Depreciación acumulada es cuenta de crédito
-  // Si hay movimientos de "activo_no_corriente" en el período con saldo neto negativo,
-  // es probable que sea por depreciación.
-  const deltaActivoNoCorriente =
-    sumarSaldos(saldosPeriodo["activo_no_corriente"]);
-  if (Math.abs(deltaActivoNoCorriente) > 0.01) {
+  // 1. Depreciación y amortización: contra-activos con naturaleza crédito
+  // dentro de activo_no_corriente (1690 Depreciación acumulada, etc.).
+  // Su saldo (credito - debito) > 0 cuando se registra depreciación.
+  let depreciacion = 0;
+  for (const s of saldosPeriodo["activo_no_corriente"] ?? []) {
+    if (s.naturaleza === "credito") {
+      depreciacion += s.saldo;
+    }
+  }
+  if (Math.abs(depreciacion) > 0.01) {
     ajustesNoCaja.push({
-      concepto: "Variación neta propiedades, planta y equipos / activos intangibles",
-      monto: deltaActivoNoCorriente,
+      concepto: "Depreciación y amortización del período",
+      monto: depreciacion,
+    });
+  }
+
+  // 2. Variación de pasivos no corrientes: provisiones y prestaciones
+  // consolidadas causadas en el período pero no pagadas en efectivo.
+  const deltaPasivoNoCorriente = sumarSaldos(saldosPeriodo["pasivo_no_corriente"]);
+  if (Math.abs(deltaPasivoNoCorriente) > 0.01) {
+    ajustesNoCaja.push({
+      concepto: "Aumento (disminución) de pasivos no corrientes y provisiones",
+      monto: deltaPasivoNoCorriente,
     });
   }
 
@@ -537,31 +560,37 @@ export async function generarEFE(
     2,
   );
 
-  // Flujos de inversión: movimientos en cuentas de activo no corriente que
-  // sí afectan efectivo (compras/ventas de P y E, intangibles, inversiones LP)
-  // Para simplificar: invertimos el signo del delta de activo_no_corriente (excluyendo
-  // la depreciación que ya está en ajustes no-caja).
+  // Flujos de inversión: compras/ventas de P&E, intangibles e inversiones LP
+  // que SÍ afectaron efectivo. Solo consideramos cuentas de naturaleza DÉBITO
+  // (activos reales: 1605/1610/.../1705/1805/...). Las contra-activos
+  // (naturaleza crédito, p.ej. 1690 Depreciación acumulada) NO son inversión
+  // — son ajuste no-caja (tratadas arriba).
+  //
+  // BUG previo: se sumaba también el saldo de contra-activos (naturaleza
+  // crédito) y se usaba `Math.abs` — esto siempre reportaba la depreciación
+  // como egreso de inversión, rompiendo la coherencia con el método indirecto.
   const flujosInversion: EFELinea[] = [];
-  // Compras de propiedades planta y equipo (débitos en cuentas 16xx con PUC 16xx en propiedad planta)
   const movsInv = movsPeriodo.filter(
     (m) =>
       (m.cuenta?.codigo ?? "").startsWith("16") ||
       (m.cuenta?.codigo ?? "").startsWith("17") ||
-      (m.cuenta?.codigo ?? "").startsWith("18"),
+      (m.cuenta?.codigo ?? "").startsWith("18") ||
+      (m.cuenta?.codigo ?? "").startsWith("19"),
   );
   let inversiones = 0;
   for (const m of movsInv) {
     const naturaleza = m.cuenta?.naturaleza ?? "debito";
+    // Solo sumar saldos de cuentas-activos reales (naturaleza débito).
+    // Saldo = débito - crédito (positivo en compra, negativo en venta).
     if (naturaleza === "debito") {
       inversiones += Number(m.debito ?? 0) - Number(m.credito ?? 0);
-    } else {
-      inversiones += Number(m.credito ?? 0) - Number(m.debito ?? 0);
     }
   }
   if (Math.abs(inversiones) > 0.01) {
     flujosInversion.push({
-      concepto: "Compra de propiedades, planta, equipos e intangibles",
-      monto: -Math.abs(inversiones),
+      concepto: "Compra (venta) de propiedades, planta, equipos e intangibles",
+      // Negativo si compra (egreso), positivo si venta (ingreso).
+      monto: -inversiones,
     });
   }
   const totalInversion = round(
