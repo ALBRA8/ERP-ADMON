@@ -9,14 +9,17 @@ import {
   Package,
   Warehouse,
   FileText,
+  FileCheck2,
   ShoppingCart,
   Wallet,
   Calculator,
   Settings,
+  Plug,
   ChevronLeft,
   ChevronRight,
   Moon,
   Sun,
+  UserCog,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -30,7 +33,10 @@ export type NavKey =
   | "compras"
   | "cartera"
   | "contabilidad"
-  | "parametros";
+  | "dian"
+  | "nomina"
+  | "parametros"
+  | "mcp";
 
 const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Principal" },
@@ -38,10 +44,13 @@ const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string 
   { key: "productos", label: "Productos", icon: Package, group: "Catálogos" },
   { key: "inventario", label: "Inventarios", icon: Warehouse, group: "Operación" },
   { key: "facturas", label: "Facturación", icon: FileText, group: "Operación" },
+  { key: "dian", label: "Facturación DIAN", icon: FileCheck2, group: "Operación" },
   { key: "compras", label: "Compras", icon: ShoppingCart, group: "Operación" },
   { key: "cartera", label: "Cartera", icon: Wallet, group: "Financiero" },
   { key: "contabilidad", label: "Contabilidad", icon: Calculator, group: "Financiero" },
+  { key: "nomina", label: "Nómina", icon: UserCog, group: "Financiero" },
   { key: "parametros", label: "Parámetros", icon: Settings, group: "Sistema" },
+  { key: "mcp", label: "MCP", icon: Plug, group: "Sistema" },
 ];
 
 interface SidebarProps {

@@ -15,7 +15,10 @@ import { FacturacionView } from "@/components/facturacion/facturacion-view";
 import { ComprasView } from "@/components/compras/compras-view";
 import { CarteraView } from "@/components/cartera/cartera-view";
 import { ContabilidadView } from "@/components/contabilidad/contabilidad-view";
+import { DianView } from "@/components/dian/dian-view";
+import { NominaView } from "@/components/nomina/nomina-view";
 import { ParametrosView } from "@/components/parametros/parametros-view";
+import { McpView } from "@/components/mcp/mcp-view";
 import { LoginView } from "@/components/auth/login-view";
 import { Sidebar, type NavKey } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -31,7 +34,10 @@ type View =
   | "compras"
   | "cartera"
   | "contabilidad"
-  | "parametros";
+  | "dian"
+  | "nomina"
+  | "parametros"
+  | "mcp";
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -101,7 +107,10 @@ export default function Home() {
           {view === "compras" && <ComprasView />}
           {view === "cartera" && <CarteraView />}
           {view === "contabilidad" && <ContabilidadView />}
+          {view === "dian" && <DianView />}
+          {view === "nomina" && <NominaView />}
           {view === "parametros" && <ParametrosView empresa={empresa} usuario={usuario} onReload={checkSession} />}
+          {view === "mcp" && <McpView />}
         </main>
       </div>
       <Toaster />

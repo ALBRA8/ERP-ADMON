@@ -717,3 +717,206 @@ model MovimientoContable {
   @@index([empresaId, cuentaId, fecha])
   @@index([empresaId, terceroId, fecha])
 }
+
+// ============================================================
+// MCP — Model Context Protocol (Anthropic open standard)
+// Expone resources/tools/prompts del ERP a LLMs externos
+// y consume servidores MCP externos (CRM-ALBRA, bancos, etc.)
+// ============================================================
+
+// Conexiones MCP externas (servidores MCP que el ERP consume)
+model MCPConexion {
+  id             String    @id @default(cuid())
+  empresaId      String
+  nombre         String // CRM-ALBRA, Banco BBVA, Shopify, etc.
+  descripcion    String?
+  tipoTransporte String    @default("sse") // sse | websocket | stdio (solo info)
+  endpoint       String // URL del servidor MCP externo (http://... o wss://...)
+  // Auth: token bearer o header custom (cifrado AES-256-GCM)
+  authTokenEnc   String?
+  authHeader     String    @default("Authorization")
+  authPrefix     String    @default("Bearer")
+  // Catálogos caché
+  resources      String? // JSON array: [{ uri, name, description, mimeType }]
+  tools          String? // JSON array: [{ name, description, inputSchema }]
+  prompts        String? // JSON array: [{ name, description, arguments }]
+  // Estado
+  activo         Boolean   @default(true)
+  ultimoSync     DateTime?
+  ultimoError    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  logs MCPLog[]
+
+  @@index([empresaId, activo])
+}
+
+// Log de todas las invocaciones MCP (auditoría)
+model MCPLog {
+  id         String       @id @default(cuid())
+  empresaId  String
+  conexionId String?
+  conexion   MCPConexion? @relation(fields: [conexionId], references: [id], onDelete: SetNull)
+  direccion  String // inbound (alguien llamó a nuestro server) | outbound (nosotros llamamos a externo)
+  tipo       String // resource | tool | prompt
+  nombre     String // uri de resource o name de tool/prompt
+  argumentos String? // JSON input
+  resultado  String? // JSON output (truncado si > 10KB)
+  duracionMs Int?
+  userId     String? // usuario que ejecutó (si fue autenticado)
+  error      String?
+  createdAt  DateTime     @default(now())
+
+  @@index([empresaId, createdAt])
+  @@index([conexionId, createdAt])
+}
+
+// ============================================================
+// Módulo de Nómina y Nómina Electrónica DIAN (CUNE)
+// Agregado por Task ERP-NOMINA
+// Modelos: NominaConcepto, Nomina, DetalleNomina, RetencionFuenteTabla
+// ============================================================
+
+// Conceptos de nómina (devengos, deducciones, aportes, provisiones)
+model NominaConcepto {
+  id                    String   @id @default(cuid())
+  empresaId             String
+  codigo                String // SALARIO_BASICO, AUX_TRANSPORTE, EPS_TRABAJADOR, etc.
+  nombre                String
+  tipo                  String // devengo | deduccion | aporte_patronal | provision
+  formula               String? // expresión: porcentaje, base (IBC), o fijo
+  cuentaContableDebito  String? // codigo PUC
+  cuentaContableCredito String?
+  basePorDefecto        String   @default("salario") // salario | ibc | total_devengado
+  porcentaje            Float    @default(0)
+  activo                Boolean  @default(true)
+  createdAt             DateTime @default(now())
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId, tipo])
+}
+
+// Cabecera de liquidación de nómina
+model Nomina {
+  id                     String   @id @default(cuid())
+  empresaId              String
+  numero                 String // NOM-2026-0001
+  tipo                   String   @default("quincenal") // quincenal | mensual | vacaciones | liquidacion_final
+  periodoInicio          DateTime
+  periodoFin             DateTime
+  fechaPago              DateTime
+  centroCostoId          String?
+  estado                 String   @default("borrador") // borrador | causada | pagada | anulada
+  // Totales
+  totalDevengos          Float    @default(0)
+  totalDeducciones       Float    @default(0)
+  totalAportesPatronales Float    @default(0)
+  totalProvisiones       Float    @default(0)
+  netoAPagar             Float    @default(0)
+  // Electrónica DIAN (CUNE)
+  cune                   String? // Código Único de Nómina Electrónica (global)
+  xmlUBL                 String? // XML global (no se usa por ahora, se genera por empleado)
+  estadoDIAN             String   @default("borrador") // borrador | procesado | aceptado | rechazado
+  comprobanteContableId  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  detalles DetalleNomina[]
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fechaPago])
+}
+
+// Detalle por empleado de la liquidación
+model DetalleNomina {
+  id                String   @id @default(cuid())
+  nominaId          String
+  nomina            Nomina   @relation(fields: [nominaId], references: [id], onDelete: Cascade)
+  empresaId         String
+  terceroId         String // empleado (Tercero tipo=empleado) — raw FK sin relation para no tocar schema Tercero
+  // Bases
+  salarioBasico     Float
+  diasLaborados     Float    @default(30)
+  ibc               Float    @default(0)
+  // Devengos y deducciones como JSON
+  devengos          String? // JSON array: [{ codigo, nombre, valor }]
+  deducciones       String? // JSON array: [{ codigo, nombre, valor }]
+  aportesPatronales String? // JSON
+  provisiones       String? // JSON
+  // Totales del empleado
+  totalDevengado    Float    @default(0)
+  totalDeducciones  Float    @default(0)
+  netoAPagar        Float    @default(0)
+  // Nómina electrónica específica
+  cuneEmpleado      String? // CUNE individual (por empleado)
+  xmlEmpleado       String?
+  createdAt         DateTime @default(now())
+
+  @@index([nominaId])
+  @@index([empresaId, terceroId])
+}
+
+// Tabla de retención en la fuente por salarios (DIAN 2026)
+model RetencionFuenteTabla {
+  id         String   @id @default(cuid())
+  empresaId  String
+  vigencia   Int      @default(2026)
+  desde      Float
+  hasta      Float
+  porcentaje Float
+  baseUVT    Float
+  activa     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([empresaId, vigencia])
+}
+
+// ---------- DIAN — Facturación Electrónica real ----------
+// Configuración DIAN por empresa (certificado X.509 P12 cifrado con
+// AES-256-GCM, datos del proveedor tecnológico autorizado, softwareId
+// y softwarePin registrados en DIAN, ambiente pruebas/producción).
+model ConfiguracionDIAN {
+  id                           String    @id @default(cuid())
+  empresaId                    String
+  ambiente                     String    @default("pruebas") // pruebas | produccion
+  certificadoP12Enc            String? // AES-256-GCM cifrado, base64 del .p12 cargado
+  certificadoPasswordEnc       String? // AES-256-GCM cifrado
+  certificadoSubject           String?
+  certificadoValidFrom         DateTime?
+  certificadoValidTo           DateTime?
+  proveedorTecnologicoNit      String? // NIT del PAC (proveedor tecnológico autorizado)
+  proveedorTecnologicoTokenEnc String? // token asignado por DIAN al PAC
+  softwareId                   String? // identificador del software registrado en DIAN
+  softwarePin                  String? // PIN del software
+  webhookUrl                   String? // URL donde DIAN notifica cambios de estado
+  activo                       Boolean   @default(false)
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  @@unique([empresaId, ambiente])
+  @@index([empresaId])
+}
+
+// Cola de envíos DIAN con reintentos automáticos (backoff exponencial).
+model DIANEnvio {
+  id             String    @id @default(cuid())
+  empresaId      String
+  facturaId      String?
+  nominaId       String?
+  tipoDocumento  String // factura_venta | nota_credito | nomina
+  cufe           String
+  trackId        String?
+  estado         String    @default("pendiente") // pendiente | enviando | aceptado | rechazado | error
+  intentos       Int       @default(0)
+  maxIntentos    Int       @default(5)
+  proximoIntento DateTime?
+  respuestaDian  String? // JSON con la respuesta de DIAN
+  mensajeError   String?
+  xmlFirmado     String? // XML con firma XAdES-EPES
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([empresaId, estado])
+  @@index([proximoIntento])
+}

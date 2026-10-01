@@ -15,6 +15,7 @@ import {
   generarUrlRepresentacionQR,
   generarXMLUBL,
 } from "@/lib/dian";
+import { enviarFacturaADian, loadDIANConfigFromDB } from "@/lib/dian-real";
 import { registrarMovimientoInventario } from "@/lib/inventario";
 import { round } from "@/lib/currency";
 
@@ -322,6 +323,47 @@ export async function POST(req: NextRequest) {
 
     // 11. Asiento contable (causación de venta)
     await generarAsientoVenta(factura.id, session.empresaId);
+
+    // 12. Integración DIAN condicional — si la empresa tiene configuración
+    // DIAN activa con certificado cargado, se firma con XAdES-EPES y se envía
+    // automáticamente a DIAN. Si no, se mantiene el flujo demo (CUFE mock +
+    // estadoDIAN="procesado") sin romper el flujo.
+    try {
+      const dianConfig = await loadDIANConfigFromDB(session.empresaId);
+      if (dianConfig) {
+        // Lanzamos el envío en background (no bloquea la respuesta al cliente);
+        // si falla, el reintento queda programado en DIANEnvio.proximoIntento.
+        // Para mantener simplicidad y mostrar el trackId al usuario, lo hacemos
+        // await aquí (timeout de 60s gestionado en dian-real.ts).
+        const envioRes = await enviarFacturaADian(
+          factura.id,
+          session.empresaId,
+        );
+        if (envioRes.ok) {
+          // Recargar la factura con su estadoDIAN actualizado
+          const refreshed = await db.facturaVenta.findUnique({
+            where: { id: factura.id },
+          });
+          if (refreshed) {
+            return ok(refreshed);
+          }
+        } else if (envioRes.mensaje) {
+          // No fatal: la factura ya está creada con CUFE/QR/XML y asiento
+          // contable. Solo falló el envío a DIAN; queda procesado para
+          // reintento automático en la cola.
+          console.warn(
+            "[facturas] DIAN envío falló (programado reintento):",
+            envioRes.mensaje,
+          );
+        }
+      }
+    } catch (e: any) {
+      // Si la integración DIAN lanza, no debe romper la creación de la factura.
+      console.error(
+        "[facturas] Error en integración DIAN (no fatal):",
+        e?.message ?? e,
+      );
+    }
 
     return ok(factura);
   } catch (e) {

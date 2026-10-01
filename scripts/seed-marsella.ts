@@ -456,6 +456,212 @@ async function main() {
     await db.centroCosto.create({ data: { empresaId: empresa.id, codigo: "VEN", nombre: "Ventas" } });
   }
 
+  // ==========================================================
+  // ERP-NOMINA: Conceptos estándar + cuentas PUC de nómina
+  // + 2 empleados demo + tabla de retención DIAN 2026
+  // ==========================================================
+
+  // 15. Cuentas PUC adicionales para el módulo de nómina
+  const pucNominaCuentas = [
+    { codigo: "25", nombre: "Aportes y contribuciones", nivel: 2, naturaleza: "credito" },
+    { codigo: "2505", nombre: "Salarios por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "250505", nombre: "Salarios por pagar empleados", nivel: 5, naturaleza: "credito" },
+    { codigo: "26", nombre: "Pasivos laborales y prestaciones sociales", nivel: 2, naturaleza: "credito" },
+    { codigo: "2610", nombre: "Cesantías por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "261005", nombre: "Cesantías consolidadas", nivel: 5, naturaleza: "credito" },
+    { codigo: "2615", nombre: "Intereses de cesantías por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "261505", nombre: "Intereses cesantías consolidadas", nivel: 5, naturaleza: "credito" },
+    { codigo: "2620", nombre: "Prima de servicios por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "262005", nombre: "Prima de servicios consolidada", nivel: 5, naturaleza: "credito" },
+    { codigo: "2625", nombre: "Vacaciones por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "262505", nombre: "Vacaciones consolidadas", nivel: 5, naturaleza: "credito" },
+    { codigo: "23", nombre: "Cuentas por pagar", nivel: 2, naturaleza: "credito" },
+    { codigo: "2370", nombre: "Aportes a entidades seguridad social por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "237005", nombre: "Aportes EPS por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "237010", nombre: "Aportes pensión por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "237015", nombre: "Aportes ARL por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "237020", nombre: "Aportes ICBF por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "237025", nombre: "Aportes SENA por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "237030", nombre: "Aportes caja de compensación por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "2365", nombre: "Retención en la fuente por pagar", nivel: 3, naturaleza: "credito" },
+    { codigo: "236505", nombre: "Retención salarios por pagar", nivel: 5, naturaleza: "credito" },
+    { codigo: "510510", nombre: "Auxilio de transporte", nivel: 5, naturaleza: "debito" },
+    { codigo: "510515", nombre: "Horas extras y recargos", nivel: 5, naturaleza: "debito" },
+    { codigo: "510520", nombre: "Aportes de la empresa (gastos)", nivel: 5, naturaleza: "debito" },
+    { codigo: "510525", nombre: "Provisiones de prestaciones sociales", nivel: 5, naturaleza: "debito" },
+  ];
+  for (const c of pucNominaCuentas) {
+    const ex = await db.cuentaPuc.findUnique({ where: { codigo: c.codigo } });
+    if (ex) continue;
+    let padreId: string | undefined;
+    if (c.codigo.length > 1) {
+      const padresCandidatos = pucNominaCuentas
+        .filter((p) => p.codigo.length < c.codigo.length && c.codigo.startsWith(p.codigo))
+        .sort((a, b) => b.codigo.length - a.codigo.length);
+      if (padresCandidatos.length > 0) {
+        const padre = await db.cuentaPuc.findUnique({ where: { codigo: padresCandidatos[0].codigo } });
+        padreId = padre?.id;
+      }
+    }
+    await db.cuentaPuc.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: c.codigo,
+        nombre: c.nombre,
+        nivel: c.nivel,
+        naturaleza: c.naturaleza as "debito" | "credito",
+        esMovimiento: c.nivel >= 4,
+        cuentaPadreId: padreId,
+      },
+    });
+  }
+  console.log("[seed] Cuentas PUC nómina agregadas:", pucNominaCuentas.length);
+
+  // 16. Conceptos de nómina estándar Marsella S.A.S.
+  const conceptosNomina = [
+    { codigo: "SALARIO_BASICO", nombre: "Salario básico", tipo: "devengo", formula: "salario * dias / 30", cuentaContableDebito: "510506", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 100 },
+    { codigo: "AUX_TRANSPORTE", nombre: "Auxilio de transporte", tipo: "devengo", formula: "si salario <= 2*SMMLV", cuentaContableDebito: "510510", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 100 },
+    { codigo: "HORA_EXTRA_DIURNA", nombre: "Horas extras diurnas (25%)", tipo: "devengo", formula: "valor_hora * 1.25 * cantidad", cuentaContableDebito: "510515", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 25 },
+    { codigo: "HORA_EXTRA_NOCTURNA", nombre: "Horas extras nocturnas (75%)", tipo: "devengo", formula: "valor_hora * 1.75 * cantidad", cuentaContableDebito: "510515", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 75 },
+    { codigo: "RECARGO_NOCTURNO", nombre: "Recargo nocturno (35%)", tipo: "devengo", formula: "valor_hora * 1.35 * cantidad", cuentaContableDebito: "510515", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 35 },
+    { codigo: "RECARGO_DOMINICAL", nombre: "Recargo dominical (75%)", tipo: "devengo", formula: "valor_hora * 1.75 * cantidad", cuentaContableDebito: "510515", cuentaContableCredito: null, basePorDefecto: "salario", porcentaje: 75 },
+    { codigo: "EPS_TRABAJADOR", nombre: "EPS trabajador (4%)", tipo: "deduccion", formula: "ibc * 4%", cuentaContableDebito: null, cuentaContableCredito: "237005", basePorDefecto: "ibc", porcentaje: 4 },
+    { codigo: "PENSION_TRABAJADOR", nombre: "Pensión trabajador (4%)", tipo: "deduccion", formula: "ibc * 4%", cuentaContableDebito: null, cuentaContableCredito: "237010", basePorDefecto: "ibc", porcentaje: 4 },
+    { codigo: "RETENCION_FUENTE", nombre: "Retención en la fuente salarios", tipo: "deduccion", formula: "tabla DIAN 2026 + dependientes", cuentaContableDebito: null, cuentaContableCredito: "236505", basePorDefecto: "total_devengado", porcentaje: 0 },
+    { codigo: "CESANTIAS", nombre: "Cesantías (8.33%)", tipo: "provision", formula: "devengado_constitutivo * 8.33%", cuentaContableDebito: "510525", cuentaContableCredito: "261005", basePorDefecto: "salario", porcentaje: 8.33 },
+    { codigo: "INTERESES_CESANTIAS", nombre: "Intereses cesantías (1%)", tipo: "provision", formula: "devengado_constitutivo * 1%", cuentaContableDebito: "510525", cuentaContableCredito: "261505", basePorDefecto: "salario", porcentaje: 1 },
+    { codigo: "PRIMA", nombre: "Prima de servicios (8.33%)", tipo: "provision", formula: "devengado_constitutivo * 8.33%", cuentaContableDebito: "510525", cuentaContableCredito: "262005", basePorDefecto: "salario", porcentaje: 8.33 },
+    { codigo: "VACACIONES", nombre: "Vacaciones (4.17%)", tipo: "provision", formula: "salario * 4.17%", cuentaContableDebito: "510525", cuentaContableCredito: "262505", basePorDefecto: "salario", porcentaje: 4.17 },
+    { codigo: "ARL_PATRONAL", nombre: "ARL patronal (0.522% a 6.96%)", tipo: "aporte_patronal", formula: "ibc * %ARL_segun_riesgo", cuentaContableDebito: "510520", cuentaContableCredito: "237015", basePorDefecto: "ibc", porcentaje: 0.522 },
+    { codigo: "ICBF_PATRONAL", nombre: "ICBF patronal (3%)", tipo: "aporte_patronal", formula: "ibc * 3% hasta 10 SMMLV", cuentaContableDebito: "510520", cuentaContableCredito: "237020", basePorDefecto: "ibc", porcentaje: 3 },
+    { codigo: "CAJA_COMPENSACION", nombre: "Caja de compensación (4%)", tipo: "aporte_patronal", formula: "ibc * 4%", cuentaContableDebito: "510520", cuentaContableCredito: "237030", basePorDefecto: "ibc", porcentaje: 4 },
+    { codigo: "SENA_PATRONAL", nombre: "SENA patronal (2%)", tipo: "aporte_patronal", formula: "ibc * 2%", cuentaContableDebito: "510520", cuentaContableCredito: "237025", basePorDefecto: "ibc", porcentaje: 2 },
+    { codigo: "PENSION_PATRONAL", nombre: "Pensión patronal (12%)", tipo: "aporte_patronal", formula: "ibc hasta 10 SMMLV * 12%", cuentaContableDebito: "510520", cuentaContableCredito: "237010", basePorDefecto: "ibc", porcentaje: 12 },
+  ];
+  for (const cn of conceptosNomina) {
+    const ex = await db.nominaConcepto.findUnique({
+      where: { empresaId_codigo: { empresaId: empresa.id, codigo: cn.codigo } },
+    });
+    if (!ex) {
+      await db.nominaConcepto.create({
+        data: { empresaId: empresa.id, ...cn, activo: true },
+      });
+    }
+  }
+  console.log("[seed] Conceptos de nómina creados:", conceptosNomina.length);
+
+  // 17. Tabla de retención en la fuente por salarios (DIAN 2026, UVT=$51.379)
+  // Rangos aproximados en pesos COP para el año 2026
+  const uvt = 51379;
+  const tablaRet = [
+    { desde: 0, hasta: uvt * 95, porcentaje: 0, baseUVT: 0 },
+    { desde: uvt * 95, hasta: uvt * 150, porcentaje: 19, baseUVT: 95 },
+    { desde: uvt * 150, hasta: uvt * 360, porcentaje: 28, baseUVT: 150 },
+    { desde: uvt * 360, hasta: uvt * 640, porcentaje: 33, baseUVT: 360 },
+    { desde: uvt * 640, hasta: uvt * 945, porcentaje: 35, baseUVT: 640 },
+    { desde: uvt * 945, hasta: uvt * 2300, porcentaje: 37, baseUVT: 945 },
+    { desde: uvt * 2300, hasta: Number.MAX_SAFE_INTEGER, porcentaje: 39, baseUVT: 2300 },
+  ];
+  for (const r of tablaRet) {
+    const ex = await db.retencionFuenteTabla.findFirst({
+      where: {
+        empresaId: empresa.id,
+        vigencia: 2026,
+        desde: r.desde,
+        hasta: r.hasta,
+      },
+    });
+    if (!ex) {
+      await db.retencionFuenteTabla.create({
+        data: {
+          empresaId: empresa.id,
+          vigencia: 2026,
+          desde: r.desde,
+          hasta: r.hasta,
+          porcentaje: r.porcentaje,
+          baseUVT: r.baseUVT,
+          activa: true,
+        },
+      });
+    }
+  }
+  console.log("[seed] Tabla de retención DIAN 2026 cargada:", tablaRet.length, "rangos");
+
+  // 18. Empleados demo (Tercero tipo=empleado)
+  const empleadosDemo = [
+    {
+      tipoDocumento: "CC",
+      numeroDocumento: "43512567",
+      digitoVerif: "0",
+      nombre: "Ana María Castaño Vélez",
+      cargo: "Coordinadora de Compras",
+      salario: 3_500_000,
+      fechaIngreso: new Date("2022-03-15"),
+      epsId: "Sura EPS",
+      afpId: "Porvenir AFP",
+      arl: "ARL Sura (riesgo 1)",
+      direccion: "Cra 45 # 12-34, El Poblado",
+      telefono: "+57 311 555 1234",
+      email: "ana.castaño@marsellasas.com",
+      ciudadId: "05001",
+    },
+    {
+      tipoDocumento: "CC",
+      numeroDocumento: "71190452",
+      digitoVerif: "8",
+      nombre: "Humberto López Marín",
+      cargo: "Vendedor Senior",
+      salario: 1_800_000,
+      fechaIngreso: new Date("2023-08-01"),
+      epsId: "Sanitas EPS",
+      afpId: "Colfondos AFP",
+      arl: "ARL Colpatria (riesgo 2)",
+      direccion: "Calle 78 # 25-12, Laureles",
+      telefono: "+57 300 444 5678",
+      email: "humberto.lopez@marsellasas.com",
+      ciudadId: "05001",
+    },
+  ];
+  const ciudadesAll = await db.ciudad.findMany();
+  for (const e of empleadosDemo) {
+    const ex = await db.tercero.findUnique({
+      where: {
+        empresaId_tipoDocumento_numeroDocumento: {
+          empresaId: empresa.id,
+          tipoDocumento: e.tipoDocumento,
+          numeroDocumento: e.numeroDocumento,
+        },
+      },
+    });
+    if (!ex) {
+      const ciu = ciudadesAll.find((c) => c.codigoDane === e.ciudadId);
+      await db.tercero.create({
+        data: {
+          empresaId: empresa.id,
+          tipo: "empleado",
+          tipoDocumento: e.tipoDocumento,
+          numeroDocumento: e.numeroDocumento,
+          digitoVerif: e.digitoVerif,
+          nombre: e.nombre,
+          direccion: e.direccion,
+          telefono: e.telefono,
+          email: e.email,
+          ciudadId: ciu?.id,
+          regimenTributario: "simple",
+          responsabilidad: "no_responsable",
+          cargo: e.cargo,
+          salario: e.salario,
+          fechaIngreso: e.fechaIngreso,
+          epsId: e.epsId,
+          afpId: e.afpId,
+          arl: e.arl,
+          activo: true,
+        },
+      });
+    }
+  }
+  console.log("[seed] Empleados demo creados:", empleadosDemo.length);
+
   console.log("[seed] ✅ Seed completado");
   console.log("[seed] Demo: demo@marsella.com / demo1234");
 }
