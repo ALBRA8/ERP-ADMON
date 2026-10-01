@@ -113,7 +113,21 @@ export default function Home() {
   if (authed === false) {
     return (
       <>
-        <LoginView onLogin={() => checkSession()} />
+        <LoginView onLogin={async () => {
+          try {
+            const r = await fetch("/api/dashboard");
+            const d = await r.json();
+            if (d.authenticated) {
+              setAuthed(true);
+              setUsuario(d.usuario);
+              setEmpresa(d.empresa);
+            } else {
+              setAuthed(false);
+            }
+          } catch {
+            setAuthed(false);
+          }
+        }} />
         <Toaster />
         <SonnerToaster />
       </>
@@ -151,7 +165,21 @@ export default function Home() {
           {view === "cajas" && <CajasView />}
           {view === "niif" && <NiifView />}
           {view === "medios" && <MediosView />}
-          {view === "parametros" && <ParametrosView empresa={empresa} usuario={usuario} onReload={checkSession} />}
+          {view === "parametros" && <ParametrosView empresa={empresa} usuario={usuario} onReload={async () => {
+            try {
+              const r = await fetch("/api/dashboard");
+              const d = await r.json();
+              if (d.authenticated) {
+                setAuthed(true);
+                setUsuario(d.usuario);
+                setEmpresa(d.empresa);
+              } else {
+                setAuthed(false);
+              }
+            } catch {
+              setAuthed(false);
+            }
+          }} />}
           {view === "admin" && <AdminView />}
           {view === "mcp" && <McpView />}
           {view === "restaurante" && <RestauranteView />}

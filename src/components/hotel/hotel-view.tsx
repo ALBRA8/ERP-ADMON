@@ -171,7 +171,34 @@ const ESTADO_HAB: Record<
       "bg-neutral-100 dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400",
     dot: "bg-neutral-500",
   },
+  reservada: {
+    label: "Reservada",
+    color:
+      "bg-violet-50 dark:bg-violet-950/30 border-violet-300 dark:border-violet-800 text-violet-700 dark:text-violet-300",
+    dot: "bg-violet-500",
+  },
+  inactiva: {
+    label: "Inactiva",
+    color:
+      "bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-500",
+    dot: "bg-neutral-400",
+  },
+  _default: {
+    label: "Desconocido",
+    color:
+      "bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-500 dark:text-neutral-500",
+    dot: "bg-neutral-400",
+  },
 };
+
+// Helper para acceso seguro a ESTADO_HAB (evita bug de Turbopack con corchetes literales)
+function getEstadoHab(estado: string) {
+  return ESTADO_HAB[estado] ?? ESTADO_HAB._default;
+}
+
+function getTipoHab(tipo: string) {
+  return TIPO_HAB[tipo] ?? TIPO_HAB.sencilla;
+}
 
 const ESTADO_RESERVA: Record<
   string,
@@ -1472,8 +1499,8 @@ function HabitacionCard({
   habitacion: Habitacion;
   onClick: () => void;
 }) {
-  const stInfo = ESTADO_HAB[habitacion.estado];
-  const tipoInfo = TIPO_HAB[habitacion.tipo] ?? TIPO_HAB.sencilla;
+  const stInfo = getEstadoHab(habitacion.estado);
+  const tipoInfo = getTipoHab(habitacion.tipo);
   const TipoIcon = tipoInfo.Icon;
   return (
     <button
@@ -1577,7 +1604,7 @@ function GestionHabitaciones({
               </TableHeader>
               <TableBody>
                 {habitaciones.map((h) => {
-                  const st = ESTADO_HAB[h.estado];
+                  const st = getEstadoHab(h.estado);
                   return (
                     <TableRow
                       key={h.id}
@@ -1590,7 +1617,7 @@ function GestionHabitaciones({
                         {h.codigo}
                       </TableCell>
                       <TableCell>
-                        {TIPO_HAB[h.tipo]?.label ?? h.tipo}
+                        {getTipoHab(h.tipo).label ?? h.tipo}
                       </TableCell>
                       <TableCell className="text-center">{h.capacidad}</TableCell>
                       <TableCell className="text-right">
