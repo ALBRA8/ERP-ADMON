@@ -290,6 +290,7 @@ model Tercero {
   comprobantesEgreso ComprobanteEgreso[]
   notas              Nota[]
   movimientosCont    MovimientoContable[]
+  creditos           Credito[]
 
   @@unique([empresaId, tipoDocumento, numeroDocumento])
   @@index([empresaId, tipo])
@@ -919,4 +920,403 @@ model DIANEnvio {
 
   @@index([empresaId, estado])
   @@index([proximoIntento])
+}
+
+// ============================================================
+// FASE 3 — Conciliación bancaria, Cajas POS, Créditos,
+// Presupuesto, Verticales Restaurante/Hotel
+// ============================================================
+
+// ---------- Bancos y Conciliación (Hermes §5.8) ----------
+
+model Banco {
+  id              String           @id @default(cuid())
+  empresaId       String
+  codigo          String // 001=BanColombia, 002=BBVA, etc.
+  nombre          String
+  nit             String?
+  contacto        String?
+  telefono        String?
+  email           String?
+  activo          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  cuentaBancarias CuentaBancaria[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId])
+}
+
+model CuentaBancaria {
+  id                    String                 @id @default(cuid())
+  empresaId             String
+  bancoId               String
+  banco                 Banco                  @relation(fields: [bancoId], references: [id], onDelete: Cascade)
+  numeroCuenta          String
+  tipo                  String                 @default("corriente") // ahorro | corriente
+  titular               String
+  saldoActual           Float                  @default(0)
+  moneda                String                 @default("COP")
+  activa                Boolean                @default(true)
+  createdAt             DateTime               @default(now())
+  movimientoBancarios   MovimientoBancario[]
+  extractoBancarios     ExtractoBancario[]
+  conciliacionBancarias ConciliacionBancaria[]
+
+  @@unique([empresaId, numeroCuenta])
+  @@index([empresaId])
+}
+
+model MovimientoBancario {
+  id               String         @id @default(cuid())
+  empresaId        String
+  cuentaBancariaId String
+  cuentaBancaria   CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id], onDelete: Cascade)
+  fecha            DateTime       @default(now())
+  tipo             String // deposito | retiro | transferencia | cheque | nota | interes | comision
+  monto            Float // positivo: entrada, negativo: salida
+  descripcion      String?
+  terceroId        String?
+  comprobanteId    String? // comprobante contable asociado
+  conciliado       Boolean        @default(false)
+  extractoId       String?
+  createdAt        DateTime       @default(now())
+
+  @@index([empresaId, fecha])
+  @@index([cuentaBancariaId, conciliado])
+}
+
+model ExtractoBancario {
+  id                    String                 @id @default(cuid())
+  empresaId             String
+  cuentaBancariaId      String
+  cuentaBancaria        CuentaBancaria         @relation(fields: [cuentaBancariaId], references: [id], onDelete: Cascade)
+  mes                   Int // 1-12
+  anio                  Int
+  saldoInicial          Float                  @default(0)
+  saldoFinal            Float                  @default(0)
+  archivo               String? // ruta o nombre del archivo MT940/CSV importado
+  estado                String                 @default("pendiente") // pendiente | conciliado | parcial
+  fechaConciliacion     DateTime?
+  createdAt             DateTime               @default(now())
+  extractoMovimientos   ExtractoMovimiento[]
+  conciliacionBancarias ConciliacionBancaria[]
+
+  @@unique([empresaId, cuentaBancariaId, mes, anio])
+  @@index([empresaId])
+}
+
+model ExtractoMovimiento {
+  id                   String           @id @default(cuid())
+  empresaId            String
+  extractoId           String
+  extracto             ExtractoBancario @relation(fields: [extractoId], references: [id], onDelete: Cascade)
+  fecha                DateTime
+  descripcion          String
+  monto                Float
+  conciliado           Boolean          @default(false)
+  movimientoBancarioId String? // si matchea con un movimiento interno
+  createdAt            DateTime         @default(now())
+
+  @@index([extractoId, conciliado])
+}
+
+model ConciliacionBancaria {
+  id                   String            @id @default(cuid())
+  empresaId            String
+  cuentaBancariaId     String
+  cuentaBancaria       CuentaBancaria    @relation(fields: [cuentaBancariaId], references: [id])
+  extractoId           String?
+  extracto             ExtractoBancario? @relation(fields: [extractoId], references: [id])
+  fecha                DateTime          @default(now())
+  saldoInicialLibro    Float             @default(0)
+  saldoInicialExtracto Float             @default(0)
+  ajustesLibro         Float             @default(0)
+  ajustesExtracto      Float             @default(0)
+  saldoFinalLibro      Float             @default(0)
+  saldoFinalExtracto   Float             @default(0)
+  diferencia           Float             @default(0)
+  estado               String            @default("borrador") // borrador | conciliada | anulada
+  userId               String?
+  observaciones        String?
+  createdAt            DateTime          @default(now())
+
+  @@index([empresaId, fecha])
+}
+
+// ---------- Cajas POS y Arqueos (Hermes §5.8) ----------
+
+model CajaPOS {
+  id            String       @id @default(cuid())
+  empresaId     String
+  codigo        String
+  nombre        String
+  ubicacion     String? // Mostrador, Salon 1, etc.
+  responsableId String?
+  saldoInicial  Float        @default(0)
+  saldoActual   Float        @default(0)
+  estado        String       @default("abierta") // abierta | cerrada
+  activa        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  arqueoCajas   ArqueoCaja[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId])
+}
+
+model ArqueoCaja {
+  id                  String   @id @default(cuid())
+  empresaId           String
+  cajaId              String
+  caja                CajaPOS  @relation(fields: [cajaId], references: [id], onDelete: Cascade)
+  fecha               DateTime @default(now())
+  turno               String   @default("completo") // mañana | tarde | noche | completo
+  saldoInicial        Float    @default(0)
+  ventasEfectivo      Float    @default(0)
+  ventasTarjeta       Float    @default(0)
+  ventasTransferencia Float    @default(0)
+  otrosIngresos       Float    @default(0)
+  gastosMenores       Float    @default(0)
+  saldoFinalSistema   Float    @default(0)
+  saldoFinalConteo    Float    @default(0)
+  diferencia          Float    @default(0)
+  observaciones       String?
+  userId              String?
+  createdAt           DateTime @default(now())
+
+  @@index([empresaId, fecha])
+  @@index([cajaId, fecha])
+}
+
+// ---------- Créditos y Financiación (Hermes §5.10) ----------
+
+model SolicitudCredito {
+  id              String    @id @default(cuid())
+  empresaId       String
+  terceroId       String?
+  montoSolicitado Float
+  tasaInteres     Float // % efectivo anual
+  plazoMeses      Int
+  cuotaN          Int // número de cuotas
+  destino         String?
+  referencias     String? // JSON
+  estado          String    @default("pendiente") // pendiente | aprobada | rechazada | anulada
+  aprobadoPorId   String?
+  fechaAprobacion DateTime?
+  observaciones   String?
+  createdAt       DateTime  @default(now())
+  creditos        Credito[]
+
+  @@index([empresaId, estado])
+}
+
+model Credito {
+  id             String            @id @default(cuid())
+  empresaId      String
+  terceroId      String?
+  tercero        Tercero?          @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  solicitudId    String?
+  solicitud      SolicitudCredito? @relation(fields: [solicitudId], references: [id])
+  montoPrincipal Float
+  tasaInteres    Float // % EA
+  plazoMeses     Int
+  cuotaN         Int
+  fechaInicio    DateTime
+  fechaFin       DateTime?
+  saldoCapital   Float             @default(0)
+  estado         String            @default("vigente") // vigente | pagado | en_mora | anulado
+  cuotas         CuotaCredito[]
+  createdAt      DateTime          @default(now())
+
+  @@index([empresaId, estado])
+}
+
+model CuotaCredito {
+  id                  String    @id @default(cuid())
+  creditoId           String
+  credito             Credito   @relation(fields: [creditoId], references: [id], onDelete: Cascade)
+  empresaId           String
+  numero              Int // 1, 2, 3...
+  fechaVencimiento    DateTime
+  capital             Float
+  interes             Float
+  totalCuota          Float
+  saldoCapital        Float // saldo capital restante después de esta cuota
+  estado              String    @default("pendiente") // pendiente | pagada | en_mora
+  fechaPago           DateTime?
+  comprobanteEgresoId String?
+  createdAt           DateTime  @default(now())
+
+  @@index([creditoId, numero])
+  @@index([empresaId, estado])
+}
+
+// ---------- Presupuesto (Hermes §5.13) ----------
+
+model RubroPresupuestal {
+  id                 String              @id @default(cuid())
+  empresaId          String
+  codigo             String
+  nombre             String
+  tipo               String // ingreso | gasto
+  nivel              Int                 @default(1)
+  cuentaPadreId      String?
+  cuentaPadre        RubroPresupuestal?  @relation("RubroTree", fields: [cuentaPadreId], references: [id])
+  children           RubroPresupuestal[] @relation("RubroTree")
+  vigencia           Int                 @default(2026)
+  apropiacionInicial Float               @default(0)
+  createdAt          DateTime            @default(now())
+  cdps               CDP[]
+
+  @@unique([empresaId, codigo, vigencia])
+  @@index([empresaId, vigencia])
+}
+
+model CDP {
+  id            String            @id @default(cuid())
+  empresaId     String
+  numero        String // CDP-2026-0001
+  fecha         DateTime          @default(now())
+  rubroId       String
+  rubro         RubroPresupuestal @relation(fields: [rubroId], references: [id])
+  valor         Float
+  concepto      String?
+  terceroId     String?
+  estado        String            @default("vigente") // vigente | anulado | comprometido
+  saldo         Float             @default(0)
+  observaciones String?
+  createdAt     DateTime          @default(now())
+  crps          CRP[]
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model CRP {
+  id        String   @id @default(cuid())
+  empresaId String
+  numero    String // CRP-2026-0001
+  cdpId     String
+  cdp       CDP      @relation(fields: [cdpId], references: [id], onDelete: Cascade)
+  fecha     DateTime @default(now())
+  valor     Float
+  concepto  String?
+  terceroId String?
+  estado    String   @default("vigente") // vigente | anulado | obligacion
+  saldo     Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model ModificacionPresupuestal {
+  id             String   @id @default(cuid())
+  empresaId      String
+  numero         String // MP-2026-0001
+  fecha          DateTime @default(now())
+  tipo           String // adicion | traslado | reduccion
+  rubroOrigenId  String?
+  rubroDestinoId String?
+  valor          Float
+  motivo         String?
+  cdpId          String?
+  estado         String   @default("vigente")
+  createdAt      DateTime @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+// ---------- Restaurante (Hermes §5.14) ----------
+
+model Mesa {
+  id        String    @id @default(cuid())
+  empresaId String
+  codigo    String
+  nombre    String
+  capacidad Int       @default(4)
+  ubicacion String? // Salon 1, Terraza, Barra...
+  posicionX Int       @default(0) // para mapa visual
+  posicionY Int       @default(0)
+  estado    String    @default("disponible") // disponible | ocupada | reservada | inactiva
+  createdAt DateTime  @default(now())
+  comandas  Comanda[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId, estado])
+}
+
+model Comanda {
+  id            String           @id @default(cuid())
+  empresaId     String
+  mesaId        String
+  mesa          Mesa             @relation(fields: [mesaId], references: [id])
+  meseroId      String?
+  estado        String           @default("abierta") // abierta | facturada | anulada | cerrada
+  fechaApertura DateTime         @default(now())
+  fechaCierre   DateTime?
+  total         Float            @default(0)
+  observaciones String?
+  detalles      DetalleComanda[]
+  createdAt     DateTime         @default(now())
+
+  @@index([empresaId, estado])
+  @@index([mesaId, estado])
+}
+
+model DetalleComanda {
+  id             String    @id @default(cuid())
+  comandaId      String
+  comanda        Comanda   @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  empresaId      String
+  productoId     String?
+  descripcion    String
+  cantidad       Float     @default(1)
+  precioUnitario Float
+  subtotal       Float
+  observaciones  String? // sin sal, extra queso...
+  estado         String    @default("solicitado") // solicitado | preparando | listo | servido | anulado
+  horaSolicitud  DateTime  @default(now())
+  horaListo      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([comandaId])
+}
+
+// ---------- Hotelería (Hermes §5.15) ----------
+
+model Habitacion {
+  id            String         @id @default(cuid())
+  empresaId     String
+  codigo        String
+  numero        String
+  tipo          String         @default("sencilla") // sencilla | doble | suite | matrimonial
+  capacidad     Int            @default(2)
+  precioBase    Float          @default(0)
+  planta        Int            @default(1)
+  estado        String         @default("disponible") // disponible | ocupada | sucia | mantenimiento
+  createdAt     DateTime       @default(now())
+  reservaHotels ReservaHotel[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId, estado])
+}
+
+model ReservaHotel {
+  id            String     @id @default(cuid())
+  empresaId     String
+  habitacionId  String
+  habitacion    Habitacion @relation(fields: [habitacionId], references: [id])
+  terceroId     String?
+  fechaCheckin  DateTime
+  fechaCheckout DateTime
+  noches        Int
+  tarifaNoche   Float
+  tarifaTotal   Float
+  estado        String     @default("confirmada") // confirmada | checkin | checkout | cancelada | no_show
+  observaciones String?
+  createdAt     DateTime   @default(now())
+
+  @@index([empresaId, fechaCheckin])
+  @@index([habitacionId, estado])
 }

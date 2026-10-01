@@ -15,10 +15,17 @@ import { FacturacionView } from "@/components/facturacion/facturacion-view";
 import { ComprasView } from "@/components/compras/compras-view";
 import { CarteraView } from "@/components/cartera/cartera-view";
 import { ContabilidadView } from "@/components/contabilidad/contabilidad-view";
+import { CreditosView } from "@/components/creditos/creditos-view";
+import { PresupuestoView } from "@/components/presupuesto/presupuesto-view";
 import { DianView } from "@/components/dian/dian-view";
 import { NominaView } from "@/components/nomina/nomina-view";
+import { ReportesView } from "@/components/reportes/reportes-view";
+import { BancosView } from "@/components/bancos/bancos-view";
+import { CajasView } from "@/components/cajas/cajas-view";
 import { ParametrosView } from "@/components/parametros/parametros-view";
 import { McpView } from "@/components/mcp/mcp-view";
+import { RestauranteView } from "@/components/restaurante/restaurante-view";
+import { HotelView } from "@/components/hotel/hotel-view";
 import { LoginView } from "@/components/auth/login-view";
 import { Sidebar, type NavKey } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -34,10 +41,17 @@ type View =
   | "compras"
   | "cartera"
   | "contabilidad"
+  | "creditos"
+  | "presupuesto"
   | "dian"
   | "nomina"
+  | "reportes"
+  | "bancos"
+  | "cajas"
   | "parametros"
-  | "mcp";
+  | "mcp"
+  | "restaurante"
+  | "hotel";
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -107,10 +121,17 @@ export default function Home() {
           {view === "compras" && <ComprasView />}
           {view === "cartera" && <CarteraView />}
           {view === "contabilidad" && <ContabilidadView />}
+          {view === "creditos" && <CreditosView />}
+          {view === "presupuesto" && <PresupuestoView />}
           {view === "dian" && <DianView />}
           {view === "nomina" && <NominaView />}
+          {view === "reportes" && <ReportesView />}
+          {view === "bancos" && <BancosView />}
+          {view === "cajas" && <CajasView />}
           {view === "parametros" && <ParametrosView empresa={empresa} usuario={usuario} onReload={checkSession} />}
           {view === "mcp" && <McpView />}
+          {view === "restaurante" && <RestauranteView />}
+          {view === "hotel" && <HotelView />}
         </main>
       </div>
       <Toaster />

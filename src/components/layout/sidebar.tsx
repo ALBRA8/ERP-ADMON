@@ -13,6 +13,8 @@ import {
   ShoppingCart,
   Wallet,
   Calculator,
+  HandCoins,
+  PieChart,
   Settings,
   Plug,
   ChevronLeft,
@@ -20,6 +22,11 @@ import {
   Moon,
   Sun,
   UserCog,
+  FileBarChart,
+  Landmark,
+  Store,
+  UtensilsCrossed,
+  BedDouble,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -33,10 +40,17 @@ export type NavKey =
   | "compras"
   | "cartera"
   | "contabilidad"
+  | "creditos"
+  | "presupuesto"
   | "dian"
   | "nomina"
+  | "reportes"
+  | "bancos"
+  | "cajas"
   | "parametros"
-  | "mcp";
+  | "mcp"
+  | "restaurante"
+  | "hotel";
 
 const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Principal" },
@@ -48,7 +62,14 @@ const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string 
   { key: "compras", label: "Compras", icon: ShoppingCart, group: "Operación" },
   { key: "cartera", label: "Cartera", icon: Wallet, group: "Financiero" },
   { key: "contabilidad", label: "Contabilidad", icon: Calculator, group: "Financiero" },
+  { key: "creditos", label: "Créditos y Financiación", icon: HandCoins, group: "Financiero" },
+  { key: "presupuesto", label: "Presupuesto", icon: PieChart, group: "Financiero" },
   { key: "nomina", label: "Nómina", icon: UserCog, group: "Financiero" },
+  { key: "bancos", label: "Bancos y Conciliación", icon: Landmark, group: "Financiero" },
+  { key: "cajas", label: "Cajas POS", icon: Store, group: "Financiero" },
+  { key: "reportes", label: "Reportes PDF", icon: FileBarChart, group: "Financiero" },
+  { key: "restaurante", label: "Restaurante", icon: UtensilsCrossed, group: "Verticales" },
+  { key: "hotel", label: "Hotelería", icon: BedDouble, group: "Verticales" },
   { key: "parametros", label: "Parámetros", icon: Settings, group: "Sistema" },
   { key: "mcp", label: "MCP", icon: Plug, group: "Sistema" },
 ];

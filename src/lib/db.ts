@@ -42,6 +42,19 @@ function hasAllModels(client: PrismaClient | undefined): boolean {
     "nominaConcepto",
     "detalleNomina",
     "retencionFuenteTabla",
+    "banco",
+    "cuentaBancaria",
+    "movimientoBancario",
+    "extractoBancario",
+    "extractoMovimiento",
+    "conciliacionBancaria",
+    "cajaPOS",
+    "arqueoCaja",
+    "mesa",
+    "comanda",
+    "detalleComanda",
+    "habitacion",
+    "reservaHotel",
   ];
   return required.every((m) => (client as any)[m] !== undefined);
 }
@@ -49,6 +62,40 @@ function hasAllModels(client: PrismaClient | undefined): boolean {
 const currentHash = schemaHash();
 const schemaChanged = global.__dbSchemaHash !== currentHash;
 const missingModels = !hasAllModels(global.__db);
+
+// Cuando se detecta schema cambiado o modelos faltantes, además de
+// invalidar el singleton global.__db, forzamos la recarga del módulo
+// @prisma/client desde disco (borrándolo del require.cache de Node.js).
+// Sin este paso, `new PrismaClient(...)` instancia la clase cacheada en
+// memoria (que NO incluye los modelos nuevos) y el ciclo se repite.
+function bustPrismaClientCacheAndReload(): typeof PrismaClient {
+  try {
+    const pathsToDelete: string[] = [];
+    for (const spec of [
+      "@prisma/client",
+      "@prisma/client/default",
+      ".prisma/client",
+      ".prisma/client/default",
+    ]) {
+      try {
+        const resolved = require.resolve(spec);
+        pathsToDelete.push(resolved);
+      } catch {
+        /* módulo no encontrado, ignorar */
+      }
+    }
+    for (const p of pathsToDelete) {
+      if (require.cache && require.cache[p]) {
+        delete require.cache[p];
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fresh = require("@prisma/client");
+    return (fresh as any).PrismaClient ?? PrismaClient;
+  } catch {
+    return PrismaClient;
+  }
+}
 
 if (global.__db && (schemaChanged || missingModels)) {
   console.log(
@@ -65,9 +112,15 @@ if (global.__db && (schemaChanged || missingModels)) {
   global.__db = undefined;
 }
 
+// Requerir PrismaClient fresco desde disco si la caché estaba stale
+const PrismaClientClass =
+  schemaChanged || missingModels
+    ? bustPrismaClientCacheAndReload()
+    : PrismaClient;
+
 export const db =
   global.__db ??
-  new PrismaClient({
+  new PrismaClientClass({
     log: ["error", "warn"],
   });
 
