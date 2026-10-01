@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { InstallButton } from "@/components/pwa/install-button";
+import { useOfflinePos } from "@/hooks/use-offline-pos";
 
 interface TopbarProps {
   usuario: any;
@@ -19,6 +21,8 @@ interface TopbarProps {
 }
 
 export function Topbar({ usuario, empresa, onLogout }: TopbarProps) {
+  const { isOnline, pendingCount } = useOfflinePos();
+
   return (
     <header className="h-14 sticky top-0 z-30 flex items-center justify-between gap-4 px-4 md:px-6 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800">
       <div className="flex items-center gap-3 min-w-0">
@@ -33,8 +37,29 @@ export function Topbar({ usuario, empresa, onLogout }: TopbarProps) {
             </span>
           </div>
         </div>
+        {pendingCount > 0 && (
+          <Badge
+            variant="outline"
+            className="hidden md:inline-flex border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 ml-2"
+            title={`${pendingCount} factura(s) pendientes de sincronización`}
+          >
+            {pendingCount} pendiente(s)
+          </Badge>
+        )}
       </div>
       <div className="flex items-center gap-2">
+        <Badge
+          variant="outline"
+          className={`hidden md:inline-flex ${
+            isOnline
+              ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+          }`}
+          title={isOnline ? "Conexión activa" : "Sin conexión — modo POS local"}
+        >
+          {isOnline ? "🟢 Online" : "🔴 Offline"}
+        </Badge>
+        <InstallButton />
         <Badge variant="outline" className="text-xs">
           {usuario?.rol ?? "user"}
         </Badge>

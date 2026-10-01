@@ -26,6 +26,13 @@ import { ParametrosView } from "@/components/parametros/parametros-view";
 import { McpView } from "@/components/mcp/mcp-view";
 import { RestauranteView } from "@/components/restaurante/restaurante-view";
 import { HotelView } from "@/components/hotel/hotel-view";
+import { CafeteroView } from "@/components/cafetero/cafetero-view";
+import { ServiciosView } from "@/components/servicios-publicos/servicios-view";
+import { TallerView } from "@/components/taller/taller-view";
+import { VehiculosView } from "@/components/vehiculos/vehiculos-view";
+import { NiifView } from "@/components/niif/niif-view";
+import { MediosView } from "@/components/medios-magneticos/medios-view";
+import { AdminView } from "@/components/admin/admin-view";
 import { LoginView } from "@/components/auth/login-view";
 import { Sidebar, type NavKey } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
@@ -48,10 +55,17 @@ type View =
   | "reportes"
   | "bancos"
   | "cajas"
+  | "niif"
+  | "medios"
   | "parametros"
+  | "admin"
   | "mcp"
   | "restaurante"
-  | "hotel";
+  | "hotel"
+  | "cafetero"
+  | "servicios"
+  | "taller"
+  | "vehiculos";
 
 export default function Home() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -128,10 +142,17 @@ export default function Home() {
           {view === "reportes" && <ReportesView />}
           {view === "bancos" && <BancosView />}
           {view === "cajas" && <CajasView />}
+          {view === "niif" && <NiifView />}
+          {view === "medios" && <MediosView />}
           {view === "parametros" && <ParametrosView empresa={empresa} usuario={usuario} onReload={checkSession} />}
+          {view === "admin" && <AdminView />}
           {view === "mcp" && <McpView />}
           {view === "restaurante" && <RestauranteView />}
           {view === "hotel" && <HotelView />}
+          {view === "cafetero" && <CafeteroView />}
+          {view === "servicios" && <ServiciosView />}
+          {view === "taller" && <TallerView />}
+          {view === "vehiculos" && <VehiculosView />}
         </main>
       </div>
       <Toaster />

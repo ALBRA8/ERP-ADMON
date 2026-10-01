@@ -64,6 +64,8 @@ model Empresa {
   tiposDocumento        TipoDocumento[]
   ciudades              Ciudad[]
   actividadesEconomicas ActividadEconomica[]
+  planSuscripcion       PlanSuscripcion?
+  auditoriaMultiTenant  AuditoriaMultiTenant[]
 }
 
 // ---------- Seguridad / RBAC (Hermes §5.1 mejorado) ----------
@@ -1319,4 +1321,359 @@ model ReservaHotel {
 
   @@index([empresaId, fechaCheckin])
   @@index([habitacionId, estado])
+}
+
+// ============================================================
+// FASE 4 — Verticales nicho + NIIF + Medios Magnéticos DIAN
+// ============================================================
+
+// ---------- Cafetero: Compra de café + Catación SCA (Hermes §5.16) ----------
+
+model Finca {
+  id            String       @id @default(cuid())
+  empresaId     String
+  nombre        String
+  ubicacion     String?
+  municipio     String?
+  propietarioId String?
+  hectareas     Float?
+  altura        Int? // metros sobre el nivel del mar
+  sombra        Boolean      @default(false)
+  observaciones String?
+  createdAt     DateTime     @default(now())
+  compras       CompraCafe[]
+
+  @@index([empresaId])
+}
+
+model CompraCafe {
+  id                String              @id @default(cuid())
+  empresaId         String
+  numero            String // CAF-2026-0001
+  terceroId         String?
+  fincaId           String?
+  finca             Finca?              @relation(fields: [fincaId], references: [id])
+  fecha             DateTime            @default(now())
+  // Pesaje físico
+  pesoBruto         Float // kg brutos
+  tara              Float               @default(0) // envases/sacos
+  pesoNeto          Float // calculado
+  factorRendimiento Float               @default(0) // % pasilla/defecto
+  humedad           Float               @default(0) // %
+  // Liquidación
+  precioBaseKg      Float // precio por kg de café pergamino
+  valorBruto        Float // pesoNeto * precioBaseKg
+  descuentos        Float               @default(0) // humedad, broca, etc.
+  retenciones       Float               @default(0) // retefuente 0.5%
+  valorPagar        Float // valorBruto - descuentos - retenciones
+  estado            String              @default("vigente") // vigente | liquidado | pagado | anulado
+  observaciones     String?
+  // Control de calidad (1-1)
+  controlCalidad    ControlCalidadCafe?
+  createdAt         DateTime            @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model ControlCalidadCafe {
+  id              String     @id @default(cuid())
+  empresaId       String
+  compraCafeId    String     @unique
+  compraCafe      CompraCafe @relation(fields: [compraCafeId], references: [id], onDelete: Cascade)
+  fecha           DateTime   @default(now())
+  // Análisis físico (almendra)
+  almendraSana    Float      @default(0) // %
+  broca           Float      @default(0) // %
+  huecos          Float      @default(0) // %
+  hongos          Float      @default(0) // %
+  defectosTotales Float      @default(0) // %
+  // Prueba de taza / catación (SCA 100 pts)
+  catacionId      String?
+  createdAt       DateTime   @default(now())
+}
+
+model PruebaTaza {
+  id               String   @id @default(cuid())
+  empresaId        String
+  controlCalidadId String?
+  fecha            DateTime @default(now())
+  catador          String?
+  // Atributos SCA (0-10 cada uno)
+  fragranciaAroma  Float    @default(0)
+  sabor            Float    @default(0)
+  saborResidual    Float    @default(0)
+  acidez           Float    @default(0)
+  cuerpo           Float    @default(0)
+  balance          Float    @default(0)
+  uniformidad      Float    @default(0)
+  tazaLimpia       Float    @default(0)
+  dulzor           Float    @default(0)
+  puntajeTotal     Float    @default(0) // suma
+  observaciones    String?
+  createdAt        DateTime @default(now())
+
+  @@index([empresaId, fecha])
+}
+
+// ---------- Servicios Públicos: Lecturas masivas (Hermes §5.17) ----------
+
+model UsuarioServicio {
+  id              String           @id @default(cuid())
+  empresaId       String
+  terceroId       String?
+  numeroContrato  String
+  direccion       String
+  estrato         Int              @default(1) // 1-6
+  uso             String           @default("residencial") // residencial|comercial|industrial|oficial
+  consumoPromedio Float            @default(0) // histórico
+  tarifaFija      Float            @default(0) // cargo fijo
+  tarifaVariable  Float            @default(0) // por unidad de consumo
+  medidor         String? // # de medidor
+  estado          String           @default("activo")
+  createdAt       DateTime         @default(now())
+  lecturaMedidors LecturaMedidor[]
+
+  @@unique([empresaId, numeroContrato])
+  @@index([empresaId])
+}
+
+model BloqueFacturacion {
+  id        String   @id @default(cuid())
+  empresaId String
+  codigo    String
+  nombre    String
+  ciclo     Int // 1-12 (mensual, bimestral, etc.)
+  diaCorte  Int // día del mes para corte
+  diaPago   Int // día límite de pago
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([empresaId, codigo])
+}
+
+model LecturaMedidor {
+  id                  String          @id @default(cuid())
+  empresaId           String
+  usuarioServicioId   String
+  usuarioServicio     UsuarioServicio @relation(fields: [usuarioServicioId], references: [id], onDelete: Cascade)
+  bloqueFacturacionId String?
+  fechaLectura        DateTime        @default(now())
+  lecturaAnterior     Float
+  lecturaActual       Float
+  consumo             Float // calculado = actual - anterior
+  observaciones       String?
+  facturada           Boolean         @default(false)
+  facturaId           String?
+  createdAt           DateTime        @default(now())
+
+  @@index([empresaId, fechaLectura])
+  @@index([usuarioServicioId])
+}
+
+model TarifaServicio {
+  id           String   @id @default(cuid())
+  empresaId    String
+  tipoServicio String // agua|energia|gas|aseo
+  estrato      Int
+  uso          String
+  rangoDesde   Float // m³ o kWh desde
+  rangoHasta   Float // m³ o kWh hasta
+  tarifa       Float // precio por unidad
+  cargoFijo    Float    @default(0)
+  activa       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  @@index([empresaId, tipoServicio])
+}
+
+// ---------- Taller / Servicio Técnico (Hermes §5.18) ----------
+
+model OrdenServicioTecnico {
+  id                      String                   @id @default(cuid())
+  empresaId               String
+  numero                  String // OST-2026-0001
+  terceroId               String?
+  fechaIngreso            DateTime                 @default(now())
+  fechaEntrega            DateTime?
+  estado                  String                   @default("ingresado") // ingresado|diagnostico|en_reparacion|listo|entregado|anulado
+  // Equipo
+  equipo                  String
+  marca                   String?
+  modelo                  String?
+  serial                  String?
+  // Problema y diagnóstico
+  problemaReportado       String
+  diagnostico             String?
+  observaciones           String?
+  tecnicoAsignadoId       String?
+  valorRepuestos          Float                    @default(0)
+  valorManoObra           Float                    @default(0)
+  valorTotal              Float                    @default(0)
+  facturaId               String?
+  createdAt               DateTime                 @default(now())
+  detalleServicioTecnicos DetalleServicioTecnico[]
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, estado])
+  @@index([empresaId, fechaIngreso])
+}
+
+model DetalleServicioTecnico {
+  id             String               @id @default(cuid())
+  ordenId        String
+  orden          OrdenServicioTecnico @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  empresaId      String
+  tipo           String // repuesto|mano_obra|insumo
+  descripcion    String
+  cantidad       Float                @default(1)
+  precioUnitario Float
+  subtotal       Float
+  createdAt      DateTime             @default(now())
+
+  @@index([ordenId])
+}
+
+// ---------- Vehículos y Mascotas (Hermes §5.19) ----------
+
+model Vehiculo {
+  id            String   @id @default(cuid())
+  empresaId     String
+  terceroId     String?
+  placa         String
+  marca         String
+  modelo        String
+  anio          Int
+  color         String?
+  kilometraje   Int      @default(0)
+  tipo          String   @default("particular") // particular|publico|carga|moto
+  observaciones String?
+  createdAt     DateTime @default(now())
+
+  @@unique([empresaId, placa])
+  @@index([empresaId])
+}
+
+model Mascota {
+  id              String    @id @default(cuid())
+  empresaId       String
+  terceroId       String?
+  nombre          String
+  especie         String // perro|gato|ave|...
+  raza            String?
+  sexo            String? // M|H
+  fechaNacimiento DateTime?
+  color           String?
+  microchip       String?
+  observaciones   String?
+  createdAt       DateTime  @default(now())
+
+  @@index([empresaId])
+}
+
+// ---------- Medios Magnéticos DIAN ----------
+
+model MedioMagnetico {
+  id                     String                  @id @default(cuid())
+  empresaId              String
+  anio                   Int // vigencia fiscal (2026)
+  formato                String // 1007|2276|2277|1647|2238
+  nombre                 String // "Certificados de retención 2026"
+  estado                 String                  @default("borrador") // borrador|generado|enviado
+  fechaGeneracion        DateTime?
+  archivo                String? // ruta del archivo .txt generado
+  totalRegistros         Int                     @default(0)
+  userId                 String?
+  createdAt              DateTime                @default(now())
+  medioMagneticoDetalles MedioMagneticoDetalle[]
+
+  @@unique([empresaId, anio, formato])
+  @@index([empresaId, anio])
+}
+
+model MedioMagneticoDetalle {
+  id              String         @id @default(cuid())
+  medioId         String
+  medio           MedioMagnetico @relation(fields: [medioId], references: [id], onDelete: Cascade)
+  // Estructura general tipo formato 1007
+  tipoDocExpedida String? // CC|NIT|CE
+  nitTercero      String
+  razonSocial     String
+  concepto        String // RETEFUENTE|RETEIVA|RETEICA
+  valorPago       Float
+  baseRetencion   Float          @default(0)
+  porcentaje      Float          @default(0)
+  valorRetenido   Float          @default(0)
+  ciudad          String?
+  createdAt       DateTime       @default(now())
+
+  @@index([medioId])
+}
+
+// ---------- NIIF / IFRS ----------
+
+model ReporteNIIF {
+  id          String   @id @default(cuid())
+  empresaId   String
+  tipo        String // ESF|EER|ECP|EFE|Notas
+  periodo     String // anual|trimestral
+  fechaInicio DateTime
+  fechaFin    DateTime
+  json_data   String // JSON con el reporte completo estructurado
+  archivo     String? // PDF generado
+  userId      String?
+  createdAt   DateTime @default(now())
+
+  @@index([empresaId, tipo, fechaFin])
+}
+
+model CuentaNIIF {
+  id          String   @id @default(cuid())
+  empresaId   String
+  codigoNIIF  String // código IFRS taxonomy
+  nombre      String
+  categoria   String // activo_corriente|activo_no_corriente|pasivo_corriente|pasivo_no_corriente|patrimonio|ingreso|gasto
+  saldoActual Float    @default(0)
+  cuentaPucId String? // mapeo al PUC colombiano
+  createdAt   DateTime @default(now())
+
+  @@unique([empresaId, codigoNIIF])
+  @@index([empresaId, categoria])
+}
+
+// ---------- Multi-empresa SaaS: Plan + Auditoría multi-tenant ----------
+
+model PlanSuscripcion {
+  id                String    @id @default(cuid())
+  empresaId         String    @unique
+  empresa           Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  plan              String    @default("free") // free | basic | pro | enterprise
+  modulos           String    @default("[]") // JSON array de módulos activos
+  limiteUsuarios    Int       @default(5)
+  limiteTerceros    Int       @default(100)
+  limiteProductos   Int       @default(100)
+  limiteFacturasMes Int       @default(100)
+  vigenteHasta      DateTime?
+  estado            String    @default("activo") // activo | suspendido | cancelado
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([empresaId])
+}
+
+model AuditoriaMultiTenant {
+  id        String   @id @default(cuid())
+  empresaId String
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  userId    String?
+  accion    String // login | crear_empresa | cambiar_plan | exportar | etc.
+  entidad   String? // factura | tercero | etc.
+  entityId  String?
+  detalles  String? // JSON
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([empresaId, createdAt])
+  @@index([userId, createdAt])
 }

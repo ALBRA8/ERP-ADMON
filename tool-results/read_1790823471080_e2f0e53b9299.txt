@@ -1,0 +1,1672 @@
+     1→"use client";
+     2→
+     3→// ============================================================
+     4→// ERP Marsella — Vista de Facturación de Venta
+     5→// Tabs: Facturas emitidas | Nueva factura
+     6→//
+     7→// Backend:
+     8→//   GET  /api/facturas          (lista paginada + búsqueda por q)
+     9→//   POST /api/facturas          (crea factura, calcula CUFE/QR/XML,
+    10→//                               descuenta inventario, asiento contable)
+    11→//   GET  /api/terceros           (clientes)
+    12→//   GET  /api/productos         (con saldos por bodega)
+    13→//   GET  /api/bodegas
+    14→//   POST /api/terceros          (crea cliente en línea)
+    15→// ============================================================
+    16→
+    17→import {
+    18→  useCallback,
+    19→  useEffect,
+    20→  useMemo,
+    21→  useRef,
+    22→  useState,
+    23→} from "react";
+    24→import {
+    25→  Plus,
+    26→  Search,
+    27→  RefreshCw,
+    28→  Trash2,
+    29→  Save,
+    30→  Receipt,
+    31→  ListChecks,
+    32→  UserPlus,
+    33→  Banknote,
+    34→  CreditCard,
+    35→  Wallet,
+    36→  CalendarClock,
+    37→  Package,
+    38→  Printer,
+    39→  FileText,
+    40→  X,
+    41→  CheckCircle2,
+    42→  ShoppingCart,
+    43→  Keyboard,
+    44→  Store,
+    45→} from "lucide-react";
+    46→import { toast } from "sonner";
+    47→
+    48→import {
+    49→  Card,
+    50→  CardContent,
+    51→  CardDescription,
+    52→  CardHeader,
+    53→  CardTitle,
+    54→} from "@/components/ui/card";
+    55→import {
+    56→  Tabs,
+    57→  TabsContent,
+    58→  TabsList,
+    59→  TabsTrigger,
+    60→} from "@/components/ui/tabs";
+    61→import { Button } from "@/components/ui/button";
+    62→import { Input } from "@/components/ui/input";
+    63→import { Label } from "@/components/ui/label";
+    64→import { Badge } from "@/components/ui/badge";
+    65→import {
+    66→  Table,
+    67→  TableBody,
+    68→  TableCell,
+    69→  TableFooter,
+    70→  TableHead,
+    71→  TableHeader,
+    72→  TableRow,
+    73→} from "@/components/ui/table";
+    74→import {
+    75→  Dialog,
+    76→  DialogContent,
+    77→  DialogDescription,
+    78→  DialogFooter,
+    79→  DialogHeader,
+    80→  DialogTitle,
+    81→} from "@/components/ui/dialog";
+    82→import {
+    83→  Select,
+    84→  SelectContent,
+    85→  SelectItem,
+    86→  SelectTrigger,
+    87→  SelectValue,
+    88→} from "@/components/ui/select";
+    89→import {
+    90→  Popover,
+    91→  PopoverContent,
+    92→  PopoverTrigger,
+    93→} from "@/components/ui/popover";
+    94→import {
+    95→  Command,
+    96→  CommandEmpty,
+    97→  CommandGroup,
+    98→  CommandInput,
+    99→  CommandItem,
+   100→  CommandList,
+   101→} from "@/components/ui/command";
+   102→import {
+   103→  ToggleGroup,
+   104→  ToggleGroupItem,
+   105→} from "@/components/ui/toggle-group";
+   106→import { Separator } from "@/components/ui/separator";
+   107→
+   108→// ---------- Tipos ----------
+   109→
+   110→interface Tercero {
+   111→  id: string;
+   112→  tipo: string;
+   113→  tipoDocumento: string;
+   114→  numeroDocumento: string;
+   115→  nombre: string;
+   116→  nombreComercial?: string | null;
+   117→}
+   118→
+   119→interface ProductoSaldo {
+   120→  id: string;
+   121→  bodegaId: string;
+   122→  cantidad: number;
+   123→}
+   124→
+   125→interface Producto {
+   126→  id: string;
+   127→  codigo: string;
+   128→  codigoBarras?: string | null;
+   129→  nombre: string;
+   130→  descripcion?: string | null;
+   131→  tipo: string;
+   132→  tarifaIva: number;
+   133→  precio1: number;
+   134→  precio2: number;
+   135→  precio3: number;
+   136→  unidadMedida?: { codigo: string; nombre: string } | null;
+   137→  bodegas?: ProductoSaldo[];
+   138→}
+   139→
+   140→interface Bodega {
+   141→  id: string;
+   142→  codigo: string;
+   143→  nombre: string;
+   144→}
+   145→
+   146→interface FacturaItem {
+   147→  id: string;
+   148→  numero: string;
+   149→  fecha: string;
+   150→  nombreCliente: string;
+   151→  nitCliente: string;
+   152→  subtotalBruto: number;
+   153→  totalIva: number;
+   154→  total: number;
+   155→  estadoDIAN: string;
+   156→  formaPago?: string | null;
+   157→  saldoPendiente: number;
+   158→  estadoCartera: string;
+   159→  esPOS?: boolean;
+   160→}
+   161→
+   162→interface ItemLine {
+   163→  key: string;
+   164→  productoId?: string;
+   165→  codigo?: string;
+   166→  descripcion: string;
+   167→  cantidad: number;
+   168→  unidadMedida: string;
+   169→  precioUnitario: number;
+   170→  descuentoPorcentaje: number;
+   171→  tarifaIva: number;
+   172→  bodegaId?: string;
+   173→}
+   174→
+   175→type FormaPago = "efectivo" | "tarjeta" | "transferencia" | "credito" | "mixto";
+   176→
+   177→// ---------- Helpers ----------
+   178→
+   179→const fmt = new Intl.NumberFormat("es-CO", {
+   180→  style: "currency",
+   181→  currency: "COP",
+   182→  minimumFractionDigits: 2,
+   183→  maximumFractionDigits: 2,
+   184→});
+   185→function formatCurrency(amount: number) {
+   186→  if (!Number.isFinite(amount)) amount = 0;
+   187→  return fmt.format(amount);
+   188→}
+   189→
+   190→function formatDate(iso: string | Date) {
+   191→  try {
+   192→    const d = typeof iso === "string" ? new Date(iso) : iso;
+   193→    return d.toLocaleDateString("es-CO", {
+   194→      year: "numeric",
+   195→      month: "2-digit",
+   196→      day: "2-digit",
+   197→    });
+   198→  } catch {
+   199→    return String(iso);
+   200→  }
+   201→}
+   202→
+   203→function todayISO() {
+   204→  const d = new Date();
+   205→  const tz = d.getTimezoneOffset() * 60000;
+   206→  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+   207→}
+   208→
+   209→function datePlusDays(days: number): string {
+   210→  const d = new Date();
+   211→  d.setDate(d.getDate() + days);
+   212→  const tz = d.getTimezoneOffset() * 60000;
+   213→  return new Date(d.getTime() - tz).toISOString().slice(0, 10);
+   214→}
+   215→
+   216→let _keyCounter = 0;
+   217→function nextKey() {
+   218→  _keyCounter += 1;
+   219→  return `it-${Date.now()}-${_keyCounter}`;
+   220→}
+   221→
+   222→function round2(n: number) {
+   223→  return Math.round((n + Number.EPSILON) * 100) / 100;
+   224→}
+   225→
+   226→function computeLine(l: ItemLine) {
+   227→  const gross = round2(l.cantidad * l.precioUnitario);
+   228→  const descuento = round2(gross * (l.descuentoPorcentaje / 100));
+   229→  const subtotal = round2(gross - descuento);
+   230→  const iva = round2(subtotal * (l.tarifaIva / 100));
+   231→  const total = round2(subtotal + iva);
+   232→  return { gross, descuento, subtotal, iva, total };
+   233→}
+   234→
+   235→function computeTotals(items: ItemLine[]) {
+   236→  let subtotalBruto = 0;
+   237→  let descuentoTotal = 0;
+   238→  let subtotalNeto = 0;
+   239→  let totalIva = 0;
+   240→  let total = 0;
+   241→  for (const l of items) {
+   242→    const c = computeLine(l);
+   243→    subtotalBruto += c.gross;
+   244→    descuentoTotal += c.descuento;
+   245→    subtotalNeto += c.subtotal;
+   246→    totalIva += c.iva;
+   247→    total += c.total;
+   248→  }
+   249→  return {
+   250→    subtotalBruto: round2(subtotalBruto),
+   251→    descuentoTotal: round2(descuentoTotal),
+   252→    subtotalNeto: round2(subtotalNeto),
+   253→    totalIva: round2(totalIva),
+   254→    total: round2(total),
+   255→  };
+   256→}
+   257→
+   258→// ---------- Badges ----------
+   259→
+   260→function estadoDianBadge(estado: string) {
+   261→  const map: Record<string, string> = {
+   262→    procesado:
+   263→      "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+   264→    aceptado:
+   265→      "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+   266→    borrador:
+   267→      "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+   268→    rechazado:
+   269→      "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300",
+   270→  };
+   271→  return (
+   272→    <Badge variant="outline" className={map[estado] ?? ""}>
+   273→      {estado}
+   274→    </Badge>
+   275→  );
+   276→}
+   277→
+   278→function carteraBadge(estado: string, saldo: number) {
+   279→  if (saldo <= 0 || estado === "pagada") {
+   280→    return (
+   281→      <Badge
+   282→        variant="outline"
+   283→        className="border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300"
+   284→      >
+   285→        Pagada
+   286→      </Badge>
+   287→    );
+   288→  }
+   289→  if (estado === "vencida") {
+   290→    return (
+   291→      <Badge
+   292→        variant="outline"
+   293→        className="border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+   294→      >
+   295→        Vencida
+   296→      </Badge>
+   297→    );
+   298→  }
+   299→  if (estado === "parcial") {
+   300→    return (
+   301→      <Badge
+   302→        variant="outline"
+   303→        className="border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+   304→      >
+   305→        Parcial
+   306→      </Badge>
+   307→    );
+   308→  }
+   309→  return (
+   310→    <Badge
+   311→      variant="outline"
+   312→      className="border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
+   313→    >
+   314→      Pendiente
+   315→    </Badge>
+   316→  );
+   317→}
+   318→
+   319→function formaPagoBadge(fp?: string | null) {
+   320→  const map: Record<string, { label: string; cls: string; Icon: any }> = {
+   321→    efectivo: {
+   322→      label: "Efectivo",
+   323→      cls: "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+   324→      Icon: Banknote,
+   325→    },
+   326→    tarjeta: {
+   327→      label: "Tarjeta",
+   328→      cls: "border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300",
+   329→      Icon: CreditCard,
+   330→    },
+   331→    transferencia: {
+   332→      label: "Transferencia",
+   333→      cls: "border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300",
+   334→      Icon: Wallet,
+   335→    },
+   336→    credito: {
+   337→      label: "Crédito",
+   338→      cls: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+   339→      Icon: CalendarClock,
+   340→    },
+   341→    mixto: {
+   342→      label: "Mixto",
+   343→      cls: "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-800 dark:bg-violet-950/40 dark:text-violet-300",
+   344→      Icon: Wallet,
+   345→    },
+   346→  };
+   347→  if (!fp || !map[fp]) {
+   348→    return <Badge variant="outline">—</Badge>;
+   349→  }
+   350→  const { label, cls, Icon } = map[fp];
+   351→  return (
+   352→    <Badge variant="outline" className={cls}>
+   353→      <Icon className="size-3 mr-1" />
+   354→      {label}
+   355→    </Badge>
+   356→  );
+   357→}
+   358→
+   359→// ============================================================
+   360→// Componente principal
+   361→// ============================================================
+   362→export function FacturacionView() {
+   363→  const [tab, setTab] = useState<string>("lista");
+   364→
+   365→  return (
+   366→    <div className="w-full">
+   367→      <Tabs value={tab} onValueChange={setTab} className="w-full">
+   368→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+   369→          <div>
+   370→            <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+   371→              <Receipt className="size-5 text-emerald-600 dark:text-emerald-400" />
+   372→              Facturación de Venta
+   373→            </h2>
+   374→            <p className="text-sm text-muted-foreground mt-1">
+   375→              Emisión de facturas electrónicas (DIAN) y POS, con cálculo de
+   376→              CUFE, inventario y asiento contable automático.
+   377→            </p>
+   378→          </div>
+   379→          <TabsList className="self-start">
+   380→            <TabsTrigger value="lista" className="gap-2">
+   381→              <ListChecks className="size-4" />
+   382→              Facturas emitidas
+   383→            </TabsTrigger>
+   384→            <TabsTrigger value="nueva" className="gap-2">
+   385→              <Plus className="size-4" />
+   386→              Nueva factura
+   387→            </TabsTrigger>
+   388→          </TabsList>
+   389→        </div>
+   390→
+   391→        <TabsContent value="lista" className="mt-0">
+   392→          <ListaFacturas onGoNew={() => setTab("nueva")} />
+   393→        </TabsContent>
+   394→
+   395→        <TabsContent value="nueva" className="mt-0">
+   396→          <NuevaFactura onDone={() => setTab("lista")} />
+   397→        </TabsContent>
+   398→      </Tabs>
+   399→    </div>
+   400→  );
+   401→}
+   402→
+   403→// ============================================================
+   404→// Tab 1 — Facturas emitidas
+   405→// ============================================================
+   406→function ListaFacturas({ onGoNew }: { onGoNew: () => void }) {
+   407→  const [facturas, setFacturas] = useState<FacturaItem[]>([]);
+   408→  const [loading, setLoading] = useState(true);
+   409→  const [search, setSearch] = useState("");
+   410→  const [debouncedSearch, setDebouncedSearch] = useState("");
+   411→
+   412→  const cargar = useCallback(async (q?: string) => {
+   413→    setLoading(true);
+   414→    try {
+   415→      const url = new URL("/api/facturas", window.location.origin);
+   416→      url.searchParams.set("pageSize", "100");
+   417→      if (q) url.searchParams.set("q", q);
+   418→      const r = await fetch(url.toString());
+   419→      const d = await r.json();
+   420→      if (!r.ok) throw new Error(d.error ?? "Error");
+   421→      setFacturas((d.items ?? []) as FacturaItem[]);
+   422→    } catch (e: any) {
+   423→      toast.error("No se pudo listar facturas", { description: e?.message });
+   424→    } finally {
+   425→      setLoading(false);
+   426→    }
+   427→  }, []);
+   428→
+   429→  useEffect(() => {
+   430→    cargar();
+   431→  }, [cargar]);
+   432→
+   433→  // debounce búsqueda
+   434→  useEffect(() => {
+   435→    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350);
+   436→    return () => clearTimeout(t);
+   437→  }, [search]);
+   438→
+   439→  useEffect(() => {
+   440→    cargar(debouncedSearch || undefined);
+   441→  }, [debouncedSearch, cargar]);
+   442→
+   443→  const filtered = useMemo(() => {
+   444→    return facturas;
+   445→  }, [facturas]);
+   446→
+   447→  return (
+   448→    <Card className="border-neutral-200 dark:border-neutral-800">
+   449→      <CardHeader className="pb-3">
+   450→        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+   451→          <div>
+   452→            <CardTitle className="text-base flex items-center gap-2">
+   453→              <ListChecks className="size-4 text-emerald-600 dark:text-emerald-400" />
+   454→              Documentos emitidos
+   455→            </CardTitle>
+   456→            <CardDescription>
+   457→              Facturas electrónicas y POS registradas ante la DIAN.
+   458→            </CardDescription>
+   459→          </div>
+   460→          <div className="flex items-center gap-2">
+   461→            <div className="relative">
+   462→              <Search className="size-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+   463→              <Input
+   464→                value={search}
+   465→                onChange={(e) => setSearch(e.target.value)}
+   466→                placeholder="Buscar número / cliente / NIT"
+   467→                className="pl-8 w-full sm:w-72"
+   468→              />
+   469→            </div>
+   470→            <Button
+   471→              variant="outline"
+   472→              size="icon"
+   473→              onClick={() => cargar(debouncedSearch || undefined)}
+   474→              title="Refrescar"
+   475→            >
+   476→              <RefreshCw className="size-4" />
+   477→            </Button>
+   478→            <Button
+   479→              onClick={onGoNew}
+   480→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+   481→            >
+   482→              <Plus className="size-4" />
+   483→              <span className="hidden sm:inline">Nueva</span>
+   484→            </Button>
+   485→          </div>
+   486→        </div>
+   487→      </CardHeader>
+   488→      <CardContent className="pt-0">
+   489→        <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+   490→          <div className="max-h-[70vh] overflow-auto">
+   491→            <Table>
+   492→              <TableHeader className="sticky top-0 z-10 bg-neutral-50 dark:bg-neutral-900">
+   493→                <TableRow>
+   494→                  <TableHead className="min-w-[120px]">Número</TableHead>
+   495→                  <TableHead className="min-w-[110px]">Fecha</TableHead>
+   496→                  <TableHead className="min-w-[200px]">Cliente</TableHead>
+   497→                  <TableHead className="text-right min-w-[120px]">Subtotal</TableHead>
+   498→                  <TableHead className="text-right min-w-[110px]">IVA</TableHead>
+   499→                  <TableHead className="text-right min-w-[130px]">Total</TableHead>
+   500→                  <TableHead className="text-center min-w-[110px]">DIAN</TableHead>
+   501→                  <TableHead className="text-center min-w-[120px]">Forma pago</TableHead>
+   502→                  <TableHead className="text-right min-w-[120px]">Saldo</TableHead>
+   503→                  <TableHead className="text-center min-w-[110px]">Cartera</TableHead>
+   504→                </TableRow>
+   505→              </TableHeader>
+   506→              <TableBody>
+   507→                {loading && (
+   508→                  <TableRow>
+   509→                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+   510→                      Cargando…
+   511→                    </TableCell>
+   512→                  </TableRow>
+   513→                )}
+   514→                {!loading && filtered.length === 0 && (
+   515→                  <TableRow>
+   516→                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+   517→                      No hay facturas registradas. Crea la primera.
+   518→                    </TableCell>
+   519→                  </TableRow>
+   520→                )}
+   521→                {!loading &&
+   522→                  filtered.map((f) => (
+   523→                    <TableRow key={f.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-900/60">
+   524→                      <TableCell className="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+   525→                        <span className="inline-flex items-center gap-1">
+   526→                          {f.esPOS && <Store className="size-3 text-teal-600 dark:text-teal-400" />}
+   527→                          {f.numero}
+   528→                        </span>
+   529→                      </TableCell>
+   530→                      <TableCell className="text-xs">{formatDate(f.fecha)}</TableCell>
+   531→                      <TableCell>
+   532→                        <div className="font-medium leading-tight">{f.nombreCliente}</div>
+   533→                        <div className="text-xs text-muted-foreground">NIT {f.nitCliente}</div>
+   534→                      </TableCell>
+   535→                      <TableCell className="text-right text-xs">
+   536→                        {formatCurrency(f.subtotalBruto)}
+   537→                      </TableCell>
+   538→                      <TableCell className="text-right text-xs">
+   539→                        {formatCurrency(f.totalIva)}
+   540→                      </TableCell>
+   541→                      <TableCell className="text-right font-semibold">
+   542→                        {formatCurrency(f.total)}
+   543→                      </TableCell>
+   544→                      <TableCell className="text-center">{estadoDianBadge(f.estadoDIAN)}</TableCell>
+   545→                      <TableCell className="text-center">
+   546→                        {formaPagoBadge(f.formaPago)}
+   547→                      </TableCell>
+   548→                      <TableCell className="text-right text-xs">
+   549→                        {f.saldoPendiente > 0 ? (
+   550→                          <span className="text-rose-600 dark:text-rose-400 font-medium">
+   551→                            {formatCurrency(f.saldoPendiente)}
+   552→                          </span>
+   553→                        ) : (
+   554→                          <span className="text-muted-foreground">—</span>
+   555→                        )}
+   556→                      </TableCell>
+   557→                      <TableCell className="text-center">
+   558→                        {carteraBadge(f.estadoCartera, f.saldoPendiente)}
+   559→                      </TableCell>
+   560→                    </TableRow>
+   561→                  ))}
+   562→              </TableBody>
+   563→            </Table>
+   564→          </div>
+   565→        </div>
+   566→      </CardContent>
+   567→    </Card>
+   568→  );
+   569→}
+   570→
+   571→// ============================================================
+   572→// Tab 2 — Nueva factura (POS-like)
+   573→// ============================================================
+   574→interface NuevaFacturaProps {
+   575→  onDone: () => void;
+   576→}
+   577→function NuevaFactura({ onDone }: NuevaFacturaProps) {
+   578→  // Catálogos
+   579→  const [clientes, setClientes] = useState<Tercero[]>([]);
+   580→  const [productos, setProductos] = useState<Producto[]>([]);
+   581→  const [bodegas, setBodegas] = useState<Bodega[]>([]);
+   582→  const [loadingCatalogos, setLoadingCatalogos] = useState(true);
+   583→
+   584→  // Form state
+   585→  const [clienteSel, setClienteSel] = useState<Tercero | null>(null);
+   586→  const [clienteComboboxOpen, setClienteComboboxOpen] = useState(false);
+   587→  const [showNuevoCliente, setShowNuevoCliente] = useState(false);
+   588→  const [nuevoClienteNombre, setNuevoClienteNombre] = useState("");
+   589→  const [nuevoClienteNIT, setNuevoClienteNIT] = useState("");
+   590→  const [creatingCliente, setCreatingCliente] = useState(false);
+   591→
+   592→  const [esPOS, setEsPOS] = useState(false);
+   593→  const [formaPago, setFormaPago] = useState<FormaPago>("efectivo");
+   594→  const [efectivoRecibido, setEfectivoRecibido] = useState<number>(0);
+   595→  const [fechaVencimiento, setFechaVencimiento] = useState<string>(datePlusDays(30));
+   596→  const [bodegaId, setBodegaId] = useState<string>("");
+   597→  const [observaciones, setObservaciones] = useState("");
+   598→
+   599→  // Items
+   600→  const [items, setItems] = useState<ItemLine[]>([]);
+   601→  const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
+   602→
+   603→  // Quick add (código o combobox de producto)
+   604→  const [quickCode, setQuickCode] = useState("");
+   605→  const [productoComboboxOpen, setProductoComboboxOpen] = useState(false);
+   606→  const quickCodeRef = useRef<HTMLInputElement>(null);
+   607→
+   608→  // Save
+   609→  const [saving, setSaving] = useState(false);
+   610→  const [exito, setExito] = useState<{
+   611→    numero: string;
+   612→    cufe?: string;
+   613→    total: number;
+   614→    cambio?: number;
+   615→  } | null>(null);
+   616→
+   617→  // ---------- Carga catálogos ----------
+   618→  const cargarClientes = useCallback(async () => {
+   619→    try {
+   620→      const r = await fetch("/api/terceros?pageSize=200&tipo=cliente");
+   621→      const d = await r.json();
+   622→      if (!r.ok) throw new Error(d.error ?? "Error");
+   623→      setClientes((d.items ?? []) as Tercero[]);
+   624→    } catch (e: any) {
+   625→      toast.error("No se pudo cargar clientes", { description: e?.message });
+   626→    }
+   627→  }, []);
+   628→
+   629→  const cargarProductos = useCallback(async () => {
+   630→    try {
+   631→      const r = await fetch("/api/productos?pageSize=500");
+   632→      const d = await r.json();
+   633→      if (!r.ok) throw new Error(d.error ?? "Error");
+   634→      setProductos((d.items ?? []) as Producto[]);
+   635→    } catch (e: any) {
+   636→      toast.error("No se pudo cargar productos", { description: e?.message });
+   637→    }
+   638→  }, []);
+   639→
+   640→  const cargarBodegas = useCallback(async () => {
+   641→    try {
+   642→      const r = await fetch("/api/bodegas");
+   643→      const d = await r.json();
+   644→      if (!r.ok) throw new Error(d.error ?? "Error");
+   645→      setBodegas((d ?? []) as Bodega[]);
+   646→    } catch (e: any) {
+   647→      toast.error("No se pudo cargar bodegas", { description: e?.message });
+   648→    }
+   649→  }, []);
+   650→
+   651→  useEffect(() => {
+   652→    (async () => {
+   653→      setLoadingCatalogos(true);
+   654→      await Promise.all([cargarClientes(), cargarProductos(), cargarBodegas()]);
+   655→      setLoadingCatalogos(false);
+   656→    })();
+   657→  }, [cargarClientes, cargarProductos, cargarBodegas]);
+   658→
+   659→  // Default bodega si solo hay una
+   660→  useEffect(() => {
+   661→    if (bodegas.length === 1 && !bodegaId) {
+   662→      setBodegaId(bodegas[0].id);
+   663→    }
+   664→  }, [bodegas, bodegaId]);
+   665→
+   666→  // ---------- Items helpers ----------
+   667→  const addProductoById = useCallback(
+   668→    (productoId: string, cantidad = 1) => {
+   669→      const p = productos.find((x) => x.id === productoId);
+   670→      if (!p) {
+   671→        toast.error("Producto no encontrado");
+   672→        return;
+   673→      }
+   674→      setItems((prev) => {
+   675→        // si ya existe, suma cantidad
+   676→        const idx = prev.findIndex((i) => i.productoId === productoId);
+   677→        if (idx >= 0) {
+   678→          const copy = [...prev];
+   679→          copy[idx] = { ...copy[idx], cantidad: round2(copy[idx].cantidad + cantidad) };
+   680→          return copy;
+   681→        }
+   682→        return [
+   683→          ...prev,
+   684→          {
+   685→            key: nextKey(),
+   686→            productoId: p.id,
+   687→            codigo: p.codigo,
+   688→            descripcion: p.descripcion || p.nombre,
+   689→            cantidad,
+   690→            unidadMedida: p.unidadMedida?.codigo ?? "UND",
+   691→            precioUnitario: p.precio1,
+   692→            descuentoPorcentaje: 0,
+   693→            tarifaIva: p.tarifaIva,
+   694→            bodegaId: bodegaId || undefined,
+   695→          },
+   696→        ];
+   697→      });
+   698→    },
+   699→    [productos, bodegaId],
+   700→  );
+   701→
+   702→  const addProductoByCode = useCallback(
+   703→    (codigo: string) => {
+   704→      const code = codigo.trim();
+   705→      if (!code) return;
+   706→      const p = productos.find(
+   707→        (x) => x.codigo.toLowerCase() === code.toLowerCase() || (x.codigoBarras ?? "").toLowerCase() === code.toLowerCase(),
+   708→      );
+   709→      if (!p) {
+   710→        toast.error("Código no encontrado", { description: `"${code}"` });
+   711→        return;
+   712→      }
+   713→      addProductoById(p.id, 1);
+   714→      setQuickCode("");
+   715→      quickCodeRef.current?.focus();
+   716→    },
+   717→    [productos, addProductoById],
+   718→  );
+   719→
+   720→  const addManualItem = useCallback(() => {
+   721→    setItems((prev) => [
+   722→      ...prev,
+   723→      {
+   724→        key: nextKey(),
+   725→        descripcion: "",
+   726→        cantidad: 1,
+   727→        unidadMedida: "UND",
+   728→        precioUnitario: 0,
+   729→        descuentoPorcentaje: 0,
+   730→        tarifaIva: 19,
+   731→        bodegaId: bodegaId || undefined,
+   732→      },
+   733→    ]);
+   734→  }, [bodegaId]);
+   735→
+   736→  const updateItem = useCallback((key: string, patch: Partial<ItemLine>) => {
+   737→    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+   738→  }, []);
+   739→
+   740→  const removeItem = useCallback((key: string) => {
+   741→    setItems((prev) => prev.filter((it) => it.key !== key));
+   742→    setSelectedItemKey((cur) => (cur === key ? null : cur));
+   743→  }, []);
+   744→
+   745→  const removeSelected = useCallback(() => {
+   746→    if (!selectedItemKey) return;
+   747→    removeItem(selectedItemKey);
+   748→  }, [selectedItemKey, removeItem]);
+   749→
+   750→  // ---------- Totales ----------
+   751→  const totales = useMemo(() => computeTotals(items), [items]);
+   752→  const cambio = useMemo(() => {
+   753→    if (formaPago !== "efectivo") return 0;
+   754→    return round2((efectivoRecibido || 0) - totales.total);
+   755→  }, [formaPago, efectivoRecibido, totales.total]);
+   756→
+   757→  // ---------- Crear cliente en línea ----------
+   758→  const crearClienteInline = useCallback(async () => {
+   759→    const nombre = nuevoClienteNombre.trim();
+   760→    const nit = nuevoClienteNIT.trim();
+   761→    if (nombre.length < 2) {
+   762→      toast.error("El nombre del cliente es obligatorio");
+   763→      return;
+   764→    }
+   765→    if (nit.length < 3) {
+   766→      toast.error("El NIT/documento del cliente es obligatorio");
+   767→      return;
+   768→    }
+   769→    setCreatingCliente(true);
+   770→    try {
+   771→      const r = await fetch("/api/terceros", {
+   772→        method: "POST",
+   773→        headers: { "Content-Type": "application/json" },
+   774→        body: JSON.stringify({
+   775→          tipo: "cliente",
+   776→          tipoDocumento: nit.length > 5 ? "NIT" : "CC",
+   777→          numeroDocumento: nit,
+   778→          nombre,
+   779→        }),
+   780→      });
+   781→      const d = await r.json();
+   782→      if (!r.ok) throw new Error(d.error ?? "Error");
+   783→      const nuevo = d as Tercero;
+   784→      await cargarClientes();
+   785→      setClienteSel(nuevo);
+   786→      setShowNuevoCliente(false);
+   787→      setNuevoClienteNombre("");
+   788→      setNuevoClienteNIT("");
+   789→      setClienteComboboxOpen(false);
+   790→      toast.success("Cliente creado", { description: `${nuevo.nombre} · ${nuevo.numeroDocumento}` });
+   791→    } catch (e: any) {
+   792→      toast.error("No se pudo crear el cliente", { description: e?.message });
+   793→    } finally {
+   794→      setCreatingCliente(false);
+   795→    }
+   796→  }, [nuevoClienteNombre, nuevoClienteNIT, cargarClientes]);
+   797→
+   798→  // ---------- Submit ----------
+   799→  const canSubmit = useMemo(() => {
+   800→    if (items.length === 0) return false;
+   801→    if (!clienteSel && !(nuevoClienteNombre.trim() && nuevoClienteNIT.trim())) {
+   802→      // Si no hay cliente seleccionado pero hay cliente nuevo abierto y completo, permitimos
+   803→      if (!(showNuevoCliente && nuevoClienteNombre.trim() && nuevoClienteNIT.trim())) {
+   804→        return false;
+   805→      }
+   806→    }
+   807→    // Validar items: descripción y cantidad > 0
+   808→    for (const it of items) {
+   809→      if (!it.descripcion.trim()) return false;
+   810→      if (!(it.cantidad > 0)) return false;
+   811→      if (!(it.precioUnitario >= 0)) return false;
+   812→    }
+   813→    if (formaPago === "efectivo" && efectivoRecibido < totales.total) return false;
+   814→    return true;
+   815→  }, [
+   816→    items,
+   817→    clienteSel,
+   818→    showNuevoCliente,
+   819→    nuevoClienteNombre,
+   820→    nuevoClienteNIT,
+   821→    formaPago,
+   822→    efectivoRecibido,
+   823→    totales.total,
+   824→  ]);
+   825→
+   826→  const handleSubmit = useCallback(async () => {
+   827→    if (!canSubmit) {
+   828→      toast.error("Completa los campos obligatorios");
+   829→      return;
+   830→    }
+   831→
+   832→    // Resolver cliente final
+   833→    let terceroId: string | undefined;
+   834→    let nombreCliente: string;
+   835→    let nitCliente: string;
+   836→    if (clienteSel) {
+   837→      terceroId = clienteSel.id;
+   838→      nombreCliente = clienteSel.nombre;
+   839→      nitCliente = clienteSel.numeroDocumento;
+   840→    } else if (showNuevoCliente && nuevoClienteNombre.trim() && nuevoClienteNIT.trim()) {
+   841→      // Crear cliente antes de emitir
+   842→      setCreatingCliente(true);
+   843→      try {
+   844→        const r = await fetch("/api/terceros", {
+   845→          method: "POST",
+   846→          headers: { "Content-Type": "application/json" },
+   847→          body: JSON.stringify({
+   848→            tipo: "cliente",
+   849→            tipoDocumento: nuevoClienteNIT.trim().length > 5 ? "NIT" : "CC",
+   850→            numeroDocumento: nuevoClienteNIT.trim(),
+   851→            nombre: nuevoClienteNombre.trim(),
+   852→          }),
+   853→        });
+   854→        const d = await r.json();
+   855→        if (!r.ok) throw new Error(d.error ?? "Error al crear cliente");
+   856→        terceroId = (d as Tercero).id;
+   857→        nombreCliente = (d as Tercero).nombre;
+   858→        nitCliente = (d as Tercero).numeroDocumento;
+   859→      } catch (e: any) {
+   860→        toast.error("No se pudo crear el cliente", { description: e?.message });
+   861→        setCreatingCliente(false);
+   862→        return;
+   863→      }
+   864→      setCreatingCliente(false);
+   865→    } else {
+   866→      toast.error("Selecciona o crea un cliente");
+   867→      return;
+   868→    }
+   869→
+   870→    setSaving(true);
+   871→    try {
+   872→      const payload: any = {
+   873→        terceroId,
+   874→        nombreCliente,
+   875→        nitCliente,
+   876→        items: items.map((it) => ({
+   877→          productoId: it.productoId,
+   878→          descripcion: it.descripcion,
+   879→          cantidad: it.cantidad,
+   880→          unidadMedida: it.unidadMedida,
+   881→          precioUnitario: it.precioUnitario,
+   882→          descuentoPorcentaje: it.descuentoPorcentaje,
+   883→          tarifaIva: it.tarifaIva,
+   884→          bodegaId: it.bodegaId,
+   885→        })),
+   886→        esPOS,
+   887→        formaPago,
+   888→        observaciones: observaciones.trim() || undefined,
+   889→      };
+   890→      if (formaPago === "efectivo") {
+   891→        payload.efectivoRecibido = efectivoRecibido;
+   892→      }
+   893→      if (formaPago === "credito") {
+   894→        payload.fechaVencimiento = fechaVencimiento;
+   895→      }
+   896→
+   897→      const r = await fetch("/api/facturas", {
+   898→        method: "POST",
+   899→        headers: { "Content-Type": "application/json" },
+   900→        body: JSON.stringify(payload),
+   901→      });
+   902→      const d = await r.json();
+   903→      if (!r.ok) {
+   904→        throw new Error(d.error ?? "Error al emitir factura");
+   905→      }
+   906→      const f = d as any;
+   907→      setExito({
+   908→        numero: f.numero,
+   909→        cufe: f.cufe,
+   910→        total: f.total,
+   911→        cambio: f.cambio,
+   912→      });
+   913→      toast.success("Factura emitida", {
+   914→        description: `${f.numero} · ${formatCurrency(f.total)}`,
+   915→      });
+   916→      // Reset
+   917→      setItems([]);
+   918→      setSelectedItemKey(null);
+   919→      setEfectivoRecibido(0);
+   920→      setObservaciones("");
+   921→      setClienteSel(null);
+   922→      setShowNuevoCliente(false);
+   923→      setNuevoClienteNombre("");
+   924→      setNuevoClienteNIT("");
+   925→    } catch (e: any) {
+   926→      toast.error("No se pudo emitir factura", { description: e?.message });
+   927→    } finally {
+   928→      setSaving(false);
+   929→    }
+   930→  }, [
+   931→    canSubmit,
+   932→    clienteSel,
+   933→    showNuevoCliente,
+   934→    nuevoClienteNombre,
+   935→    nuevoClienteNIT,
+   936→    items,
+   937→    esPOS,
+   938→    formaPago,
+   939→    efectivoRecibido,
+   940→    fechaVencimiento,
+   941→    observaciones,
+   942→  ]);
+   943→
+   944→  // ---------- Atajos de teclado ----------
+   945→  useEffect(() => {
+   946→    const handler = (e: KeyboardEvent) => {
+   947→      // F2 → guardar
+   948→      if (e.key === "F2") {
+   949→        e.preventDefault();
+   950→        if (!saving) handleSubmit();
+   951→        return;
+   952→      }
+   953→      // Supr/Delete → eliminar fila seleccionada (no cuando focus en input)
+   954→      const target = e.target as HTMLElement | null;
+   955→      const inInput =
+   956→        target &&
+   957→        (target.tagName === "INPUT" ||
+   958→          target.tagName === "TEXTAREA" ||
+   959→          target.isContentEditable);
+   960→      if ((e.key === "Delete" || e.key === "Del") && !inInput) {
+   961→        if (selectedItemKey) {
+   962→          e.preventDefault();
+   963→          removeSelected();
+   964→        }
+   965→      }
+   966→    };
+   967→    window.addEventListener("keydown", handler);
+   968→    return () => window.removeEventListener("keydown", handler);
+   969→  }, [handleSubmit, saving, selectedItemKey, removeSelected]);
+   970→
+   971→  // ---------- Render ----------
+   972→  return (
+   973→    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   974→      {/* Columna izquierda: cliente + pago */}
+   975→      <div className="lg:col-span-1 space-y-4">
+   976→        <Card className="border-neutral-200 dark:border-neutral-800">
+   977→          <CardHeader className="pb-3">
+   978→            <CardTitle className="text-sm flex items-center gap-2">
+   979→              <UserPlus className="size-4 text-emerald-600 dark:text-emerald-400" />
+   980→              Cliente
+   981→            </CardTitle>
+   982→          </CardHeader>
+   983→          <CardContent className="space-y-3">
+   984→            <div>
+   985→              <Label className="text-xs">Cliente</Label>
+   986→              <Popover open={clienteComboboxOpen} onOpenChange={setClienteComboboxOpen}>
+   987→                <PopoverTrigger asChild>
+   988→                  <Button
+   989→                    variant="outline"
+   990→                    role="combobox"
+   991→                    className="w-full justify-between font-normal"
+   992→                  >
+   993→                    {clienteSel
+   994→                      ? `${clienteSel.nombre} · ${clienteSel.numeroDocumento}`
+   995→                      : "Seleccionar cliente…"}
+   996→                  </Button>
+   997→                </PopoverTrigger>
+   998→                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[260px] p-0" align="start">
+   999→                  <Command>
+  1000→                    <CommandInput placeholder="Buscar nombre o NIT…" />
+  1001→                    <CommandList>
+  1002→                      <CommandEmpty>No hay coincidencias.</CommandEmpty>
+  1003→                      <CommandGroup heading="Clientes">
+  1004→                        {clientes.map((c) => (
+  1005→                          <CommandItem
+  1006→                            key={c.id}
+  1007→                            value={`${c.nombre} ${c.numeroDocumento}`}
+  1008→                            onSelect={() => {
+  1009→                              setClienteSel(c);
+  1010→                              setShowNuevoCliente(false);
+  1011→                              setClienteComboboxOpen(false);
+  1012→                            }}
+  1013→                          >
+  1014→                            <div className="flex flex-col">
+  1015→                              <span>{c.nombre}</span>
+  1016→                              <span className="text-xs text-muted-foreground">
+  1017→                                {c.numeroDocumento}
+  1018→                              </span>
+  1019→                            </div>
+  1020→                          </CommandItem>
+  1021→                        ))}
+  1022→                      </CommandGroup>
+  1023→                    </CommandList>
+  1024→                  </Command>
+  1025→                  <Separator />
+  1026→                  <div className="p-2">
+  1027→                    <Button
+  1028→                      variant="outline"
+  1029→                      size="sm"
+  1030→                      className="w-full border-dashed"
+  1031→                      onClick={() => {
+  1032→                        setShowNuevoCliente(true);
+  1033→                        setClienteSel(null);
+  1034→                        setClienteComboboxOpen(false);
+  1035→                      }}
+  1036→                    >
+  1037→                      <UserPlus className="size-4" />
+  1038→                      Crear cliente en línea
+  1039→                    </Button>
+  1040→                  </div>
+  1041→                </PopoverContent>
+  1042→              </Popover>
+  1043→            </div>
+  1044→
+  1045→            {showNuevoCliente && (
+  1046→              <div className="rounded-md border border-dashed border-emerald-300 dark:border-emerald-800 p-3 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-2">
+  1047→                <div className="flex items-center justify-between">
+  1048→                  <Label className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+  1049→                    Nuevo cliente
+  1050→                  </Label>
+  1051→                  <Button
+  1052→                    variant="ghost"
+  1053→                    size="icon"
+  1054→                    className="size-6"
+  1055→                    onClick={() => setShowNuevoCliente(false)}
+  1056→                  >
+  1057→                    <X className="size-3" />
+  1058→                  </Button>
+  1059→                </div>
+  1060→                <div>
+  1061→                  <Label className="text-xs">Nombre / Razón social</Label>
+  1062→                  <Input
+  1063→                    value={nuevoClienteNombre}
+  1064→                    onChange={(e) => setNuevoClienteNombre(e.target.value)}
+  1065→                    placeholder="Ej. Comercial Marsella S.A.S"
+  1066→                  />
+  1067→                </div>
+  1068→                <div>
+  1069→                  <Label className="text-xs">NIT / Documento</Label>
+  1070→                  <Input
+  1071→                    value={nuevoClienteNIT}
+  1072→                    onChange={(e) => setNuevoClienteNIT(e.target.value)}
+  1073→                    placeholder="900.123.456-7"
+  1074→                  />
+  1075→                </div>
+  1076→                <Button
+  1077→                  size="sm"
+  1078→                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+  1079→                  onClick={crearClienteInline}
+  1080→                  disabled={creatingCliente}
+  1081→                >
+  1082→                  {creatingCliente ? "Guardando…" : "Guardar cliente"}
+  1083→                </Button>
+  1084→              </div>
+  1085→            )}
+  1086→
+  1087→            {!showNuevoCliente && clienteSel && (
+  1088→              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 p-3 text-sm bg-neutral-50 dark:bg-neutral-900/40">
+  1089→                <div className="font-medium">{clienteSel.nombre}</div>
+  1090→                <div className="text-xs text-muted-foreground mt-0.5">
+  1091→                  Doc: {clienteSel.numeroDocumento} · Tipo: {clienteSel.tipoDocumento}
+  1092→                </div>
+  1093→              </div>
+  1094→            )}
+  1095→          </CardContent>
+  1096→        </Card>
+  1097→
+  1098→        <Card className="border-neutral-200 dark:border-neutral-800">
+  1099→          <CardHeader className="pb-3">
+  1100→            <CardTitle className="text-sm flex items-center gap-2">
+  1101→              <CreditCard className="size-4 text-emerald-600 dark:text-emerald-400" />
+  1102→              Tipo y forma de pago
+  1103→            </CardTitle>
+  1104→          </CardHeader>
+  1105→          <CardContent className="space-y-4">
+  1106→            <div>
+  1107→              <Label className="text-xs">Tipo de factura</Label>
+  1108→              <ToggleGroup
+  1109→                type="single"
+  1110→                value={esPOS ? "pos" : "estandar"}
+  1111→                onValueChange={(v) => v && setEsPOS(v === "pos")}
+  1112→                variant="outline"
+  1113→                className="w-full"
+  1114→              >
+  1115→                <ToggleGroupItem value="estandar" className="flex-1">
+  1116→                  <FileText className="size-4 mr-1.5" />
+  1117→                  Estándar
+  1118→                </ToggleGroupItem>
+  1119→                <ToggleGroupItem value="pos" className="flex-1">
+  1120→                  <Store className="size-4 mr-1.5" />
+  1121→                  POS
+  1122→                </ToggleGroupItem>
+  1123→              </ToggleGroup>
+  1124→            </div>
+  1125→
+  1126→            <div>
+  1127→              <Label className="text-xs">Forma de pago</Label>
+  1128→              <div className="grid grid-cols-2 gap-2">
+  1129→                <FormaPagoButton
+  1130→                  active={formaPago === "efectivo"}
+  1131→                  onClick={() => setFormaPago("efectivo")}
+  1132→                  icon={<Banknote className="size-4" />}
+  1133→                  label="Efectivo"
+  1134→                />
+  1135→                <FormaPagoButton
+  1136→                  active={formaPago === "tarjeta"}
+  1137→                  onClick={() => setFormaPago("tarjeta")}
+  1138→                  icon={<CreditCard className="size-4" />}
+  1139→                  label="Tarjeta"
+  1140→                />
+  1141→                <FormaPagoButton
+  1142→                  active={formaPago === "transferencia"}
+  1143→                  onClick={() => setFormaPago("transferencia")}
+  1144→                  icon={<Wallet className="size-4" />}
+  1145→                  label="Transferencia"
+  1146→                />
+  1147→                <FormaPagoButton
+  1148→                  active={formaPago === "credito"}
+  1149→                  onClick={() => setFormaPago("credito")}
+  1150→                  icon={<CalendarClock className="size-4" />}
+  1151→                  label="Crédito"
+  1152→                />
+  1153→              </div>
+  1154→            </div>
+  1155→
+  1156→            {formaPago === "efectivo" && (
+  1157→              <div className="grid grid-cols-2 gap-2">
+  1158→                <div>
+  1159→                  <Label className="text-xs">Efectivo recibido</Label>
+  1160→                  <Input
+  1161→                    type="number"
+  1162→                    min={0}
+  1163→                    step="any"
+  1164→                    value={efectivoRecibido || ""}
+  1165→                    onChange={(e) =>
+  1166→                      setEfectivoRecibido(parseFloat(e.target.value) || 0)
+  1167→                    }
+  1168→                    placeholder="0"
+  1169→                  />
+  1170→                </div>
+  1171→                <div>
+  1172→                  <Label className="text-xs">Cambio</Label>
+  1173→                  <div
+  1174→                    className={`h-9 rounded-md border px-3 flex items-center text-sm font-semibold ${
+  1175→                      cambio < 0
+  1176→                        ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+  1177→                        : "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+  1178→                    }`}
+  1179→                  >
+  1180→                    {formatCurrency(cambio)}
+  1181→                  </div>
+  1182→                </div>
+  1183→              </div>
+  1184→            )}
+  1185→
+  1186→            {formaPago === "credito" && (
+  1187→              <div>
+  1188→                <Label className="text-xs">Fecha de vencimiento</Label>
+  1189→                <Input
+  1190→                  type="date"
+  1191→                  value={fechaVencimiento}
+  1192→                  onChange={(e) => setFechaVencimiento(e.target.value)}
+  1193→                />
+  1194→                <p className="text-[10px] text-muted-foreground mt-1">
+  1195→                  Default: hoy + 30 días. La factura generará cartera pendiente.
+  1196→                </p>
+  1197→              </div>
+  1198→            )}
+  1199→
+  1200→            {bodegas.length > 1 && (
+  1201→              <div>
+  1202→                <Label className="text-xs">Bodega</Label>
+  1203→                <Select value={bodegaId} onValueChange={setBodegaId}>
+  1204→                  <SelectTrigger>
+  1205→                    <SelectValue placeholder="Seleccionar bodega" />
+  1206→                  </SelectTrigger>
+  1207→                  <SelectContent>
+  1208→                    {bodegas.map((b) => (
+  1209→                      <SelectItem key={b.id} value={b.id}>
+  1210→                        {b.codigo} · {b.nombre}
+  1211→                      </SelectItem>
+  1212→                    ))}
+  1213→                  </SelectContent>
+  1214→                </Select>
+  1215→              </div>
+  1216→            )}
+  1217→
+  1218→            <div>
+  1219→              <Label className="text-xs">Observaciones</Label>
+  1220→              <Input
+  1221→                value={observaciones}
+  1222→                onChange={(e) => setObservaciones(e.target.value)}
+  1223→                placeholder="Opcional"
+  1224→              />
+  1225→            </div>
+  1226→          </CardContent>
+  1227→        </Card>
+  1228→
+  1229→        <Card className="border-neutral-200 dark:border-neutral-800 bg-emerald-50/40 dark:bg-emerald-950/10">
+  1230→          <CardHeader className="pb-2">
+  1231→            <CardTitle className="text-xs flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+  1232→              <Keyboard className="size-3.5" />
+  1233→              Atajos
+  1234→            </CardTitle>
+  1235→          </CardHeader>
+  1236→          <CardContent className="text-[11px] text-muted-foreground space-y-1 pt-0">
+  1237→            <div className="flex justify-between">
+  1238→              <span>Buscar producto por código</span>
+  1239→              <kbd className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700">Enter</kbd>
+  1240→            </div>
+  1241→            <div className="flex justify-between">
+  1242→              <span>Eliminar fila seleccionada</span>
+  1243→              <kbd className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700">Supr</kbd>
+  1244→            </div>
+  1245→            <div className="flex justify-between">
+  1246→              <span>Emitir factura</span>
+  1247→              <kbd className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700">F2</kbd>
+  1248→            </div>
+  1249→          </CardContent>
+  1250→        </Card>
+  1251→      </div>
+  1252→
+  1253→      {/* Columna derecha: items + totales */}
+  1254→      <div className="lg:col-span-2 space-y-4">
+  1255→        <Card className="border-neutral-200 dark:border-neutral-800">
+  1256→          <CardHeader className="pb-3">
+  1257→            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+  1258→              <div>
+  1259→                <CardTitle className="text-sm flex items-center gap-2">
+  1260→                  <ShoppingCart className="size-4 text-emerald-600 dark:text-emerald-400" />
+  1261→                  Items de la factura
+  1262→                </CardTitle>
+  1263→                <CardDescription>
+  1264→                  Agrega productos por código/barras o seleccionando del catálogo.
+  1265→                </CardDescription>
+  1266→              </div>
+  1267→              <div className="flex items-center gap-2">
+  1268→                <Popover open={productoComboboxOpen} onOpenChange={setProductoComboboxOpen}>
+  1269→                  <PopoverTrigger asChild>
+  1270→                    <Button variant="outline" size="sm">
+  1271→                      <Package className="size-4" />
+  1272→                      <span className="hidden sm:inline">Catálogo</span>
+  1273→                    </Button>
+  1274→                  </PopoverTrigger>
+  1275→                  <PopoverContent className="w-[400px] p-0" align="end">
+  1276→                    <Command>
+  1277→                      <CommandInput placeholder="Buscar por nombre o código…" />
+  1278→                      <CommandList>
+  1279→                        <CommandEmpty>No hay productos.</CommandEmpty>
+  1280→                        <CommandGroup>
+  1281→                          {productos.slice(0, 200).map((p) => (
+  1282→                            <CommandItem
+  1283→                              key={p.id}
+  1284→                              value={`${p.codigo} ${p.nombre}`}
+  1285→                              onSelect={() => {
+  1286→                                addProductoById(p.id, 1);
+  1287→                                setProductoComboboxOpen(false);
+  1288→                                quickCodeRef.current?.focus();
+  1289→                              }}
+  1290→                            >
+  1291→                              <div className="flex flex-col">
+  1292→                                <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400">
+  1293→                                  {p.codigo}
+  1294→                                </span>
+  1295→                                <span>{p.nombre}</span>
+  1296→                                <span className="text-xs text-muted-foreground">
+  1297→                                  {formatCurrency(p.precio1)} · IVA {p.tarifaIva}%
+  1298→                                </span>
+  1299→                              </div>
+  1300→                            </CommandItem>
+  1301→                          ))}
+  1302→                        </CommandGroup>
+  1303→                      </CommandList>
+  1304→                    </Command>
+  1305→                  </PopoverContent>
+  1306→                </Popover>
+  1307→                <Button variant="outline" size="sm" onClick={addManualItem}>
+  1308→                  <Plus className="size-4" />
+  1309→                  <span className="hidden sm:inline">Item manual</span>
+  1310→                </Button>
+  1311→              </div>
+  1312→            </div>
+  1313→          </CardHeader>
+  1314→          <CardContent className="space-y-3">
+  1315→            {/* Quick add por código */}
+  1316→            <div className="flex gap-2">
+  1317→              <Input
+  1318→                ref={quickCodeRef}
+  1319→                value={quickCode}
+  1320→                onChange={(e) => setQuickCode(e.target.value)}
+  1321→                onKeyDown={(e) => {
+  1322→                  if (e.key === "Enter") {
+  1323→                    e.preventDefault();
+  1324→                    addProductoByCode(quickCode);
+  1325→                  }
+  1326→                }}
+  1327→                placeholder="Escriba código o código de barras y presione Enter"
+  1328→                disabled={loadingCatalogos}
+  1329→              />
+  1330→              <Button
+  1331→                onClick={() => addProductoByCode(quickCode)}
+  1332→                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1333→                disabled={loadingCatalogos}
+  1334→              >
+  1335→                <Plus className="size-4" />
+  1336→                Agregar
+  1337→              </Button>
+  1338→            </div>
+  1339→
+  1340→            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-auto">
+  1341→              <div className="max-h-[48vh] overflow-auto">
+  1342→                <Table>
+  1343→                  <TableHeader className="sticky top-0 z-10 bg-neutral-50 dark:bg-neutral-900">
+  1344→                    <TableRow>
+  1345→                      <TableHead className="w-[110px]">Código</TableHead>
+  1346→                      <TableHead className="min-w-[220px]">Descripción</TableHead>
+  1347→                      <TableHead className="w-[80px] text-right">Cant.</TableHead>
+  1348→                      <TableHead className="w-[120px] text-right">Precio</TableHead>
+  1349→                      <TableHead className="w-[80px] text-right">Desc %</TableHead>
+  1350→                      <TableHead className="w-[80px] text-right">IVA %</TableHead>
+  1351→                      <TableHead className="w-[110px] text-right">Subtotal</TableHead>
+  1352→                      <TableHead className="w-[110px] text-right">IVA</TableHead>
+  1353→                      <TableHead className="w-[120px] text-right">Total</TableHead>
+  1354→                      <TableHead className="w-[40px]"></TableHead>
+  1355→                    </TableRow>
+  1356→                  </TableHeader>
+  1357→                  <TableBody>
+  1358→                    {items.length === 0 && (
+  1359→                      <TableRow>
+  1360→                        <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+  1361→                          Sin items. Agrega productos por código o usa el catálogo.
+  1362→                        </TableCell>
+  1363→                      </TableRow>
+  1364→                    )}
+  1365→                    {items.map((it) => {
+  1366→                      const c = computeLine(it);
+  1367→                      const isSelected = selectedItemKey === it.key;
+  1368→                      return (
+  1369→                        <TableRow
+  1370→                          key={it.key}
+  1371→                          data-state={isSelected ? "selected" : undefined}
+  1372→                          onClick={() => setSelectedItemKey(it.key)}
+  1373→                          className={`cursor-pointer ${isSelected ? "bg-emerald-50/60 dark:bg-emerald-950/20" : ""}`}
+  1374→                        >
+  1375→                          <TableCell className="font-mono text-xs">
+  1376→                            {it.codigo ?? (
+  1377→                              <span className="text-muted-foreground italic">manual</span>
+  1378→                            )}
+  1379→                          </TableCell>
+  1380→                          <TableCell>
+  1381→                            <Input
+  1382→                              value={it.descripcion}
+  1383→                              onChange={(e) => updateItem(it.key, { descripcion: e.target.value })}
+  1384→                              onClick={(e) => e.stopPropagation()}
+  1385→                              className="h-8"
+  1386→                              placeholder="Descripción del item"
+  1387→                            />
+  1388→                          </TableCell>
+  1389→                          <TableCell className="text-right">
+  1390→                            <Input
+  1391→                              type="number"
+  1392→                              min={0}
+  1393→                              step="any"
+  1394→                              value={it.cantidad || ""}
+  1395→                              onChange={(e) =>
+  1396→                                updateItem(it.key, { cantidad: parseFloat(e.target.value) || 0 })
+  1397→                              }
+  1398→                              onClick={(e) => e.stopPropagation()}
+  1399→                              className="h-8 w-16 text-right"
+  1400→                            />
+  1401→                          </TableCell>
+  1402→                          <TableCell className="text-right">
+  1403→                            <Input
+  1404→                              type="number"
+  1405→                              min={0}
+  1406→                              step="any"
+  1407→                              value={it.precioUnitario || ""}
+  1408→                              onChange={(e) =>
+  1409→                                updateItem(it.key, { precioUnitario: parseFloat(e.target.value) || 0 })
+  1410→                              }
+  1411→                              onClick={(e) => e.stopPropagation()}
+  1412→                              className="h-8 w-28 text-right"
+  1413→                            />
+  1414→                          </TableCell>
+  1415→                          <TableCell className="text-right">
+  1416→                            <Input
+  1417→                              type="number"
+  1418→                              min={0}
+  1419→                              max={100}
+  1420→                              step="any"
+  1421→                              value={it.descuentoPorcentaje || ""}
+  1422→                              onChange={(e) =>
+  1423→                                updateItem(it.key, {
+  1424→                                  descuentoPorcentaje: parseFloat(e.target.value) || 0,
+  1425→                                })
+  1426→                              }
+  1427→                              onClick={(e) => e.stopPropagation()}
+  1428→                              className="h-8 w-16 text-right"
+  1429→                            />
+  1430→                          </TableCell>
+  1431→                          <TableCell className="text-right">
+  1432→                            <Select
+  1433→                              value={String(it.tarifaIva)}
+  1434→                              onValueChange={(v) =>
+  1435→                                updateItem(it.key, { tarifaIva: parseFloat(v) })
+  1436→                              }
+  1437→                            >
+  1438→                              <SelectTrigger
+  1439→                                className="h-8 w-20"
+  1440→                                onClick={(e) => e.stopPropagation()}
+  1441→                              >
+  1442→                                <SelectValue />
+  1443→                              </SelectTrigger>
+  1444→                              <SelectContent>
+  1445→                                {[0, 5, 19].map((p) => (
+  1446→                                  <SelectItem key={p} value={String(p)}>
+  1447→                                    {p}%
+  1448→                                  </SelectItem>
+  1449→                                ))}
+  1450→                              </SelectContent>
+  1451→                            </Select>
+  1452→                          </TableCell>
+  1453→                          <TableCell className="text-right text-xs">
+  1454→                            {formatCurrency(c.subtotal)}
+  1455→                          </TableCell>
+  1456→                          <TableCell className="text-right text-xs">
+  1457→                            {formatCurrency(c.iva)}
+  1458→                          </TableCell>
+  1459→                          <TableCell className="text-right text-xs font-semibold">
+  1460→                            {formatCurrency(c.total)}
+  1461→                          </TableCell>
+  1462→                          <TableCell>
+  1463→                            <Button
+  1464→                              variant="ghost"
+  1465→                              size="icon"
+  1466→                              className="size-7 text-rose-600 hover:text-rose-700"
+  1467→                              onClick={(e) => {
+  1468→                                e.stopPropagation();
+  1469→                                removeItem(it.key);
+  1470→                              }}
+  1471→                              title="Eliminar fila"
+  1472→                            >
+  1473→                              <Trash2 className="size-3.5" />
+  1474→                            </Button>
+  1475→                          </TableCell>
+  1476→                        </TableRow>
+  1477→                      );
+  1478→                    })}
+  1479→                  </TableBody>
+  1480→                </Table>
+  1481→              </div>
+  1482→            </div>
+  1483→
+  1484→            {/* Totales */}
+  1485→            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+  1486→              <div className="space-y-1.5 text-sm">
+  1487→                <div className="flex justify-between">
+  1488→                  <span className="text-muted-foreground">Subtotal bruto:</span>
+  1489→                  <span className="font-mono">{formatCurrency(totales.subtotalBruto)}</span>
+  1490→                </div>
+  1491→                <div className="flex justify-between">
+  1492→                  <span className="text-muted-foreground">Descuento total:</span>
+  1493→                  <span className="font-mono text-rose-600 dark:text-rose-400">
+  1494→                    − {formatCurrency(totales.descuentoTotal)}
+  1495→                  </span>
+  1496→                </div>
+  1497→                <div className="flex justify-between">
+  1498→                  <span className="text-muted-foreground">Subtotal neto:</span>
+  1499→                  <span className="font-mono">{formatCurrency(totales.subtotalNeto)}</span>
+  1500→                </div>
+  1501→                <div className="flex justify-between">
+  1502→                  <span className="text-muted-foreground">IVA:</span>
+  1503→                  <span className="font-mono">{formatCurrency(totales.totalIva)}</span>
+  1504→                </div>
+  1505→              </div>
+  1506→              <div className="rounded-md border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-3 flex flex-col justify-center">
+  1507→                <div className="text-xs text-emerald-700 dark:text-emerald-400">Total</div>
+  1508→                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 font-mono">
+  1509→                  {formatCurrency(totales.total)}
+  1510→                </div>
+  1511→                {formaPago === "efectivo" && efectivoRecibido > 0 && (
+  1512→                  <div className="text-xs text-muted-foreground mt-1">
+  1513→                    Cambio:{" "}
+  1514→                    <span
+  1515→                      className={
+  1516→                        cambio < 0
+  1517→                          ? "text-rose-600 dark:text-rose-400 font-semibold"
+  1518→                          : "text-emerald-700 dark:text-emerald-300 font-semibold"
+  1519→                      }
+  1520→                    >
+  1521→                      {formatCurrency(cambio)}
+  1522→                    </span>
+  1523→                  </div>
+  1524→                )}
+  1525→              </div>
+  1526→            </div>
+  1527→
+  1528→            {/* Validación resumen */}
+  1529→            {items.length > 0 && !canSubmit && (
+  1530→              <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-2 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+  1531→                <CheckCircle2 className="size-4 shrink-0 mt-0.5" />
+  1532→                <div>
+  1533→                  {clienteSel || (showNuevoCliente && nuevoClienteNombre.trim() && nuevoClienteNIT.trim())
+  1534→                    ? "Revisa que todos los items tengan descripción y cantidad mayor a 0."
+  1535→                    : "Selecciona o crea un cliente para emitir la factura."}
+  1536→                  {formaPago === "efectivo" && efectivoRecibido < totales.total && (
+  1537→                    <> El efectivo recibido es menor al total.</>
+  1538→                  )}
+  1539→                </div>
+  1540→              </div>
+  1541→            )}
+  1542→
+  1543→            {/* Botón emitir */}
+  1544→            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
+  1545→              <Button
+  1546→                variant="outline"
+  1547→                onClick={() => {
+  1548→                  setItems([]);
+  1549→                  setSelectedItemKey(null);
+  1550→                  setEfectivoRecibido(0);
+  1551→                  setObservaciones("");
+  1552→                  setClienteSel(null);
+  1553→                }}
+  1554→                disabled={saving || items.length === 0}
+  1555→              >
+  1556→                <X className="size-4" />
+  1557→                Limpiar
+  1558→              </Button>
+  1559→              <Button
+  1560→                onClick={handleSubmit}
+  1561→                disabled={!canSubmit || saving}
+  1562→                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1563→              >
+  1564→                {saving ? (
+  1565→                  <RefreshCw className="size-4 animate-spin" />
+  1566→                ) : (
+  1567→                  <Save className="size-4" />
+  1568→                )}
+  1569→                Emitir factura
+  1570→                <kbd className="ml-1 px-1.5 py-0.5 rounded bg-emerald-700/50 text-[10px]">F2</kbd>
+  1571→              </Button>
+  1572→            </div>
+  1573→          </CardContent>
+  1574→        </Card>
+  1575→      </div>
+  1576→
+  1577→      {/* Modal de éxito */}
+  1578→      <Dialog open={!!exito} onOpenChange={(o) => !o && setExito(null)}>
+  1579→        <DialogContent className="sm:max-w-md">
+  1580→          <DialogHeader>
+  1581→            <DialogTitle className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+  1582→              <CheckCircle2 className="size-5" />
+  1583→              Factura emitida
+  1584→            </DialogTitle>
+  1585→            <DialogDescription>
+  1586→              La factura fue registrada exitosamente ante la DIAN.
+  1587→            </DialogDescription>
+  1588→          </DialogHeader>
+  1589→          {exito && (
+  1590→            <div className="space-y-3">
+  1591→              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/40 p-3 space-y-1.5 text-sm">
+  1592→                <div className="flex justify-between">
+  1593→                  <span className="text-muted-foreground">Número</span>
+  1594→                  <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400">
+  1595→                    {exito.numero}
+  1596→                  </span>
+  1597→                </div>
+  1598→                <div className="flex justify-between">
+  1599→                  <span className="text-muted-foreground">Total</span>
+  1600→                  <span className="font-mono">{formatCurrency(exito.total)}</span>
+  1601→                </div>
+  1602→                {exito.cambio !== undefined && exito.cambio > 0 && (
+  1603→                  <div className="flex justify-between">
+  1604→                    <span className="text-muted-foreground">Cambio</span>
+  1605→                    <span className="font-mono">{formatCurrency(exito.cambio)}</span>
+  1606→                  </div>
+  1607→                )}
+  1608→                {exito.cufe && (
+  1609→                  <div>
+  1610→                    <span className="text-muted-foreground text-xs">CUFE</span>
+  1611→                    <div className="font-mono text-[10px] break-all bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded p-2 mt-1">
+  1612→                      {exito.cufe}
+  1613→                    </div>
+  1614→                  </div>
+  1615→                )}
+  1616→              </div>
+  1617→            </div>
+  1618→          )}
+  1619→          <DialogFooter className="gap-2">
+  1620→            <Button
+  1621→              variant="outline"
+  1622→              onClick={() => {
+  1623→                toast.info("Impresión", {
+  1624→                  description: "La impresión de la factura electrónica será habilitada próximamente.",
+  1625→                });
+  1626→              }}
+  1627→            >
+  1628→              <Printer className="size-4" />
+  1629→              Imprimir
+  1630→            </Button>
+  1631→            <Button
+  1632→              onClick={() => {
+  1633→                setExito(null);
+  1634→                onDone();
+  1635→              }}
+  1636→              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+  1637→            >
+  1638→              Ver facturas
+  1639→            </Button>
+  1640→          </DialogFooter>
+  1641→        </DialogContent>
+  1642→      </Dialog>
+  1643→    </div>
+  1644→  );
+  1645→}
+  1646→
+  1647→// ============================================================
+  1648→// Subcomponente: botón de forma de pago
+  1649→// ============================================================
+  1650→interface FormaPagoButtonProps {
+  1651→  active: boolean;
+  1652→  onClick: () => void;
+  1653→  icon: React.ReactNode;
+  1654→  label: string;
+  1655→}
+  1656→function FormaPagoButton({ active, onClick, icon, label }: FormaPagoButtonProps) {
+  1657→  return (
+  1658→    <button
+  1659→      type="button"
+  1660→      onClick={onClick}
+  1661→      className={`flex items-center justify-center gap-1.5 h-10 rounded-md border text-sm transition-colors ${
+  1662→        active
+  1663→          ? "border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+  1664→          : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+  1665→      }`}
+  1666→    >
+  1667→      {icon}
+  1668→      {label}
+  1669→    </button>
+  1670→  );
+  1671→}
+  1672→

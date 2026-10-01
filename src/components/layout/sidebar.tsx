@@ -27,9 +27,18 @@ import {
   Store,
   UtensilsCrossed,
   BedDouble,
+  BarChart3,
+  FileSpreadsheet,
+  Shield,
+  Coffee,
+  Zap,
+  Wrench,
+  Car,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useOfflinePos } from "@/hooks/use-offline-pos";
 
 export type NavKey =
   | "dashboard"
@@ -47,10 +56,17 @@ export type NavKey =
   | "reportes"
   | "bancos"
   | "cajas"
+  | "niif"
+  | "medios"
   | "parametros"
+  | "admin"
   | "mcp"
   | "restaurante"
-  | "hotel";
+  | "hotel"
+  | "cafetero"
+  | "servicios"
+  | "taller"
+  | "vehiculos";
 
 const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Principal" },
@@ -68,9 +84,16 @@ const NAV: { key: NavKey; label: string; icon: React.ElementType; group: string 
   { key: "bancos", label: "Bancos y Conciliación", icon: Landmark, group: "Financiero" },
   { key: "cajas", label: "Cajas POS", icon: Store, group: "Financiero" },
   { key: "reportes", label: "Reportes PDF", icon: FileBarChart, group: "Financiero" },
+  { key: "niif", label: "Estados NIIF", icon: BarChart3, group: "Financiero" },
+  { key: "medios", label: "Medios Magnéticos", icon: FileSpreadsheet, group: "Financiero" },
   { key: "restaurante", label: "Restaurante", icon: UtensilsCrossed, group: "Verticales" },
   { key: "hotel", label: "Hotelería", icon: BedDouble, group: "Verticales" },
+  { key: "cafetero", label: "Cafetero", icon: Coffee, group: "Verticales" },
+  { key: "servicios", label: "Servicios Públicos", icon: Zap, group: "Verticales" },
+  { key: "taller", label: "Taller", icon: Wrench, group: "Verticales" },
+  { key: "vehiculos", label: "Vehículos y Mascotas", icon: Car, group: "Verticales" },
   { key: "parametros", label: "Parámetros", icon: Settings, group: "Sistema" },
+  { key: "admin", label: "Administración", icon: Shield, group: "Sistema" },
   { key: "mcp", label: "MCP", icon: Plug, group: "Sistema" },
 ];
 
@@ -83,6 +106,7 @@ interface SidebarProps {
 export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const { theme, setTheme } = useTheme();
+  const { pendingCount } = useOfflinePos();
 
   const grouped: Record<string, typeof NAV> = {};
   for (const n of NAV) {
@@ -125,6 +149,7 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
               {items.map((item) => {
                 const Icon = item.icon;
                 const isActive = active === item.key;
+                const showPendingBadge = item.key === "facturas" && pendingCount > 0;
                 return (
                   <button
                     key={item.key}
@@ -135,11 +160,23 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
                       isActive
                         ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 font-medium"
                         : "text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800",
-                      collapsed && "justify-center",
+                      collapsed && "justify-center relative",
                     )}
                   >
                     <Icon className="w-4 h-4 shrink-0" />
-                    {!collapsed && <span className="truncate">{item.label}</span>}
+                    {!collapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
+                    {showPendingBadge && !collapsed && (
+                      <Badge
+                        variant="outline"
+                        className="ml-auto border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] px-1.5 py-0 h-5 min-w-[20px] justify-center"
+                        title={`${pendingCount} factura(s) pendiente(s) de sincronización`}
+                      >
+                        {pendingCount}
+                      </Badge>
+                    )}
+                    {showPendingBadge && collapsed && (
+                      <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500" />
+                    )}
                   </button>
                 );
               })}

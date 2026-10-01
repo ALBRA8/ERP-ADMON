@@ -1,0 +1,2002 @@
+     1→// ============================================================
+     2→// pdf.ts — Librería de generación de reportes PDF para el ERP Marsella
+     3→// Reemplaza a Crystal Reports (Hermes §10.4).
+     4→//
+     5→// Usa @react-pdf/renderer (solo en servidor). Cada generador
+     6→// devuelve un Buffer listo para enviar como Response con
+     7→// Content-Type: application/pdf.
+     8→// ============================================================
+     9→import {
+    10→  Document,
+    11→  Page,
+    12→  View,
+    13→  Text,
+    14→  StyleSheet,
+    15→  renderToBuffer,
+    16→} from "@react-pdf/renderer";
+    17→import { db } from "@/lib/db";
+    18→import { round } from "@/lib/currency";
+    19→
+    20→// ---------- Helpers de formato ----------
+    21→
+    22→const fmtCOP = (n: number): string => {
+    23→  const v = Number.isFinite(n) ? n : 0;
+    24→  return new Intl.NumberFormat("es-CO", {
+    25→    style: "currency",
+    26→    currency: "COP",
+    27→    minimumFractionDigits: 0,
+    28→    maximumFractionDigits: 2,
+    29→  }).format(v);
+    30→};
+    31→
+    32→const fmtNumber = (n: number, decimals = 2): string => {
+    33→  const v = Number.isFinite(n) ? n : 0;
+    34→  return new Intl.NumberFormat("es-CO", {
+    35→    minimumFractionDigits: decimals,
+    36→    maximumFractionDigits: decimals,
+    37→  }).format(v);
+    38→};
+    39→
+    40→const fmtFecha = (d: Date | string | null | undefined): string => {
+    41→  if (!d) return "—";
+    42→  const date = typeof d === "string" ? new Date(d) : d;
+    43→  if (isNaN(date.getTime())) return "—";
+    44→  return new Intl.DateTimeFormat("es-CO", {
+    45→    year: "numeric",
+    46→    month: "2-digit",
+    47→    day: "2-digit",
+    48→  }).format(date);
+    49→};
+    50→
+    51→const fmtFechaHora = (d: Date | string | null | undefined): string => {
+    52→  if (!d) return "—";
+    53→  const date = typeof d === "string" ? new Date(d) : d;
+    54→  if (isNaN(date.getTime())) return "—";
+    55→  return new Intl.DateTimeFormat("es-CO", {
+    56→    year: "numeric",
+    57→    month: "2-digit",
+    58→    day: "2-digit",
+    59→    hour: "2-digit",
+    60→    minute: "2-digit",
+    61→  }).format(date);
+    62→};
+    63→
+    64→// ---------- Tipos de datos ----------
+    65→
+    66→interface EmpresaInfo {
+    67→  razonSocial: string;
+    68→  nit: string;
+    69→  nombreComercial?: string | null;
+    70→  direccion?: string | null;
+    71→  telefono?: string | null;
+    72→  ciudad?: string | null;
+    73→  email?: string | null;
+    74→  representanteLegal?: string | null;
+    75→  regimenTributario?: string | null;
+    76→  responsabilidad?: string | null;
+    77→  moneda?: string | null;
+    78→}
+    79→
+    80→async function cargarEmpresa(empresaId: string): Promise<EmpresaInfo | null> {
+    81→  const e = await db.empresa.findUnique({ where: { id: empresaId } });
+    82→  if (!e) return null;
+    83→  return e;
+    84→}
+    85→
+    86→// ---------- Estilos ----------
+    87→
+    88→const COLORS = {
+    89→  primary: "#047857", // emerald-700
+    90→  primaryDark: "#065f46",
+    91→  primaryLight: "#d1fae5",
+    92→  accent: "#0d9488", // teal-600
+    93→  bg: "#f8fafc",
+    94→  border: "#cbd5e1",
+    95→  textMuted: "#475569",
+    96→  textDark: "#0f172a",
+    97→  warning: "#d97706",
+    98→  danger: "#b91c1c",
+    99→};
+   100→
+   101→const styles = StyleSheet.create({
+   102→  page: {
+   103→    fontSize: 9,
+   104→    fontFamily: "Helvetica",
+   105→    color: COLORS.textDark,
+   106→    backgroundColor: "#ffffff",
+   107→    paddingTop: 20,
+   108→    paddingBottom: 60, // espacio para footer fijo
+   109→    paddingHorizontal: 32,
+   110→  },
+   111→  // ----- Header -----
+   112→  headerWrap: {
+   113→    flexDirection: "row",
+   114→    borderBottomWidth: 2,
+   115→    borderBottomColor: COLORS.primary,
+   116→    paddingBottom: 8,
+   117→    marginBottom: 12,
+   118→  },
+   119→  logoBox: {
+   120→    width: 70,
+   121→    height: 70,
+   122→    backgroundColor: COLORS.primary,
+   123→    borderRadius: 4,
+   124→    justifyContent: "center",
+   125→    alignItems: "center",
+   126→    marginRight: 12,
+   127→  },
+   128→  logoText: {
+   129→    color: "#ffffff",
+   130→    fontSize: 8,
+   131→    fontWeight: "bold",
+   132→    textAlign: "center",
+   133→    lineHeight: 1.1,
+   134→  },
+   135→  empresaBlock: { flex: 1, flexDirection: "column" },
+   136→  razonSocial: {
+   137→    fontSize: 13,
+   138→    fontWeight: "bold",
+   139→    color: COLORS.primary,
+   140→  },
+   141→  empresaMeta: {
+   142→    fontSize: 8,
+   143→    color: COLORS.textMuted,
+   144→    marginTop: 2,
+   145→  },
+   146→  emissionBlock: { flexDirection: "column", alignItems: "flex-end" },
+   147→  emissionLabel: {
+   148→    fontSize: 7,
+   149→    color: COLORS.textMuted,
+   150→    textTransform: "uppercase",
+   151→  },
+   152→  emissionValue: { fontSize: 9, fontWeight: "bold" },
+   153→  // ----- Título -----
+   154→  titulo: {
+   155→    fontSize: 16,
+   156→    fontWeight: "bold",
+   157→    color: COLORS.primary,
+   158→    textAlign: "center",
+   159→    marginVertical: 10,
+   160→    textTransform: "uppercase",
+   161→    letterSpacing: 0.5,
+   162→  },
+   163→  subtitulo: {
+   164→    fontSize: 9,
+   165→    color: COLORS.textMuted,
+   166→    textAlign: "center",
+   167→    marginBottom: 10,
+   168→  },
+   169→  // ----- Tablas -----
+   170→  table: { flexDirection: "column", width: "auto", marginTop: 4 },
+   171→  tableRow: { flexDirection: "row" },
+   172→  tableColHeader: {
+   173→    backgroundColor: COLORS.primary,
+   174→    color: "#ffffff",
+   175→    fontWeight: "bold",
+   176→    fontSize: 8,
+   177→    padding: 4,
+   178→    borderRightWidth: 0.5,
+   179→    borderRightColor: "#ffffff",
+   180→  },
+   181→  tableCol: {
+   182→    padding: 4,
+   183→    fontSize: 8,
+   184→    borderRightWidth: 0.5,
+   185→    borderRightColor: COLORS.border,
+   186→    borderBottomWidth: 0.5,
+   187→    borderBottomColor: COLORS.border,
+   188→  },
+   189→  tableRowAlt: { backgroundColor: "#f1f5f9" },
+   190→  // ----- Footer -----
+   191→  footer: {
+   192→    position: "absolute",
+   193→    bottom: 20,
+   194→    left: 32,
+   195→    right: 32,
+   196→    flexDirection: "row",
+   197→    justifyContent: "space-between",
+   198→    borderTopWidth: 1,
+   199→    borderTopColor: COLORS.border,
+   200→    paddingTop: 4,
+   201→    fontSize: 7,
+   202→    color: COLORS.textMuted,
+   203→  },
+   204→  // ----- Secciones -----
+   205→  section: { marginTop: 8, marginBottom: 6 },
+   206→  sectionTitle: {
+   207→    fontSize: 10,
+   208→    fontWeight: "bold",
+   209→    color: COLORS.primary,
+   210→    marginBottom: 4,
+   211→    borderBottomWidth: 0.5,
+   212→    borderBottomColor: COLORS.border,
+   213→    paddingBottom: 2,
+   214→  },
+   215→  boxRow: { flexDirection: "row", marginBottom: 6 },
+   216→  boxCol: {
+   217→    flex: 1,
+   218→    padding: 6,
+   219→    borderWidth: 0.5,
+   220→    borderColor: COLORS.border,
+   221→    borderRadius: 3,
+   222→    marginHorizontal: 2,
+   223→  },
+   224→  boxLabel: { fontSize: 7, color: COLORS.textMuted, textTransform: "uppercase" },
+   225→  boxValue: { fontSize: 9, fontWeight: "bold" },
+   226→  kpiBox: {
+   227→    flex: 1,
+   228→    backgroundColor: COLORS.primaryLight,
+   229→    borderRadius: 4,
+   230→    padding: 8,
+   231→    marginHorizontal: 2,
+   232→    marginBottom: 4,
+   233→  },
+   234→  kpiLabel: { fontSize: 7, color: COLORS.primaryDark, textTransform: "uppercase" },
+   235→  kpiValue: { fontSize: 13, fontWeight: "bold", color: COLORS.primary },
+   236→  totalsTable: { marginTop: 6, marginLeft: "auto", width: "50%" },
+   237→  totalsRow: {
+   238→    flexDirection: "row",
+   239→    paddingVertical: 2,
+   240→    borderBottomWidth: 0.25,
+   241→    borderBottomColor: COLORS.border,
+   242→  },
+   243→  totalsRowBold: {
+   244→    flexDirection: "row",
+   245→    paddingVertical: 4,
+   246→    backgroundColor: COLORS.primaryLight,
+   247→    borderTopWidth: 1,
+   248→    borderTopColor: COLORS.primary,
+   249→  },
+   250→  totalsLabel: { flex: 1, fontSize: 9, paddingHorizontal: 6 },
+   251→  totalsValue: {
+   252→    flex: 1,
+   253→    fontSize: 9,
+   254→    fontWeight: "bold",
+   255→    textAlign: "right",
+   256→    paddingHorizontal: 6,
+   257→  },
+   258→  qrPlaceholder: {
+   259→    width: 90,
+   260→    height: 90,
+   261→    borderWidth: 1,
+   262→    borderColor: COLORS.border,
+   263→    justifyContent: "center",
+   264→    alignItems: "center",
+   265→    padding: 4,
+   266→  },
+   267→  qrText: { fontSize: 6, color: COLORS.textMuted, textAlign: "center" },
+   268→  cufeBox: {
+   269→    marginTop: 8,
+   270→    padding: 6,
+   271→    backgroundColor: "#ecfdf5",
+   272→    borderLeftWidth: 3,
+   273→    borderLeftColor: COLORS.primary,
+   274→    borderRadius: 2,
+   275→  },
+   276→  cufeLabel: { fontSize: 7, color: COLORS.primaryDark, textTransform: "uppercase" },
+   277→  cufeValue: {
+   278→    fontSize: 8,
+   279→    fontFamily: "Courier-Bold",
+   280→    color: COLORS.textDark,
+   281→    marginTop: 2,
+   282→  },
+   283→  stampBox: {
+   284→    marginTop: 8,
+   285→    padding: 8,
+   286→    borderWidth: 1,
+   287→    borderColor: COLORS.danger,
+   288→    borderRadius: 4,
+   289→    alignItems: "center",
+   290→  },
+   291→  stampText: {
+   292→    fontSize: 10,
+   293→    fontWeight: "bold",
+   294→    color: COLORS.danger,
+   295→    textTransform: "uppercase",
+   296→  },
+   297→  notaText: { fontSize: 7, color: COLORS.textMuted, marginTop: 4, fontStyle: "italic" },
+   298→  badgeBox: {
+   299→    paddingVertical: 2,
+   300→    paddingHorizontal: 6,
+   301→    borderRadius: 3,
+   302→    fontSize: 7,
+   303→    fontWeight: "bold",
+   304→    color: "#ffffff",
+   305→  },
+   306→});
+   307→
+   308→// ---------- Componentes comunes ----------
+   309→
+   310→function Header({
+   311→  empresa,
+   312→  titulo,
+   313→  subtitulo,
+   314→  numero,
+   315→}: {
+   316→  empresa: EmpresaInfo;
+   317→  titulo: string;
+   318→  subtitulo?: string;
+   319→  numero?: string;
+   320→}) {
+   321→  const now = new Date();
+   322→  return (
+   323→    <View>
+   324→      <View style={styles.headerWrap}>
+   325→        <View style={styles.logoBox}>
+   326→          <Text style={styles.logoText}>MARSELLA{"\n"}ERP</Text>
+   327→        </View>
+   328→        <View style={styles.empresaBlock}>
+   329→          <Text style={styles.razonSocial}>{empresa.razonSocial}</Text>
+   330→          <Text style={styles.empresaMeta}>NIT: {empresa.nit}</Text>
+   331→          {empresa.direccion && (
+   332→            <Text style={styles.empresaMeta}>{empresa.direccion}</Text>
+   333→          )}
+   334→          {(empresa.ciudad || empresa.telefono) && (
+   335→            <Text style={styles.empresaMeta}>
+   336→              {[empresa.ciudad, empresa.telefono].filter(Boolean).join(" · ")}
+   337→            </Text>
+   338→          )}
+   339→          {empresa.email && (
+   340→            <Text style={styles.empresaMeta}>{empresa.email}</Text>
+   341→          )}
+   342→          {empresa.representanteLegal && (
+   343→            <Text style={styles.empresaMeta}>
+   344→              Representante legal: {empresa.representanteLegal}
+   345→            </Text>
+   346→          )}
+   347→        </View>
+   348→        <View style={styles.emissionBlock}>
+   349→          <Text style={styles.emissionLabel}>Fecha emisión</Text>
+   350→          <Text style={styles.emissionValue}>{fmtFecha(now)}</Text>
+   351→          {numero && (
+   352→            <>
+   353→              <Text style={[styles.emissionLabel, { marginTop: 4 }]}>No.</Text>
+   354→              <Text style={styles.emissionValue}>{numero}</Text>
+   355→            </>
+   356→          )}
+   357→          <Text style={[styles.emissionLabel, { marginTop: 4 }]}>Página</Text>
+   358→          <Text
+   359→            style={styles.emissionValue}
+   360→            render={({ pageNumber, totalPages }) =>
+   361→              `${pageNumber} / ${totalPages}`
+   362→            }
+   363→          />
+   364→        </View>
+   365→      </View>
+   366→      <Text style={styles.titulo}>{titulo}</Text>
+   367→      {subtitulo && <Text style={styles.subtitulo}>{subtitulo}</Text>}
+   368→    </View>
+   369→  );
+   370→}
+   371→
+   372→function Footer() {
+   373→  return (
+   374→    <View style={styles.footer} fixed>
+   375→      <Text>
+   376→        Generado por Marsella ERP · {fmtFechaHora(new Date())}
+   377→      </Text>
+   378→      <Text>
+   379→        Página{" "}
+   380→        <Text
+   381→          render={({ pageNumber, totalPages }) =>
+   382→            `${pageNumber} / ${totalPages}`
+   383→          }
+   384→        />
+   385→      </Text>
+   386→    </View>
+   387→  );
+   388→}
+   389→
+   390→interface Col {
+   391→  label: string;
+   392→  width: string;
+   393→  align?: "left" | "right" | "center";
+   394→  render: (row: any, i: number) => string;
+   395→}
+   396→
+   397→function TablePDF({ columns, rows }: { columns: Col[]; rows: any[] }) {
+   398→  if (rows.length === 0) {
+   399→    return (
+   400→      <View style={[styles.table, { padding: 8 }]}>
+   401→        <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   402→          Sin movimientos para mostrar.
+   403→        </Text>
+   404→      </View>
+   405→    );
+   406→  }
+   407→  return (
+   408→    <View style={styles.table}>
+   409→      <View style={styles.tableRow}>
+   410→        {columns.map((c, i) => (
+   411→          <Text
+   412→            key={i}
+   413→            style={[
+   414→              styles.tableColHeader,
+   415→              { width: c.width, textAlign: c.align ?? "left" },
+   416→            ]}
+   417→          >
+   418→            {c.label}
+   419→          </Text>
+   420→        ))}
+   421→      </View>
+   422→      {rows.map((row, ri) => (
+   423→        <View
+   424→          key={ri}
+   425→          style={[styles.tableRow, ri % 2 === 1 ? styles.tableRowAlt : {}]}
+   426→        >
+   427→          {columns.map((c, ci) => (
+   428→            <Text
+   429→              key={ci}
+   430→              style={[
+   431→                styles.tableCol,
+   432→                { width: c.width, textAlign: c.align ?? "left" },
+   433→              ]}
+   434→            >
+   435→              {c.render(row, ri)}
+   436→            </Text>
+   437→          ))}
+   438→        </View>
+   439→      ))}
+   440→    </View>
+   441→  );
+   442→}
+   443→
+   444→function TotalRow({
+   445→  label,
+   446→  value,
+   447→  bold,
+   448→}: {
+   449→  label: string;
+   450→  value: string;
+   451→  bold?: boolean;
+   452→}) {
+   453→  return (
+   454→    <View style={bold ? styles.totalsRowBold : styles.totalsRow}>
+   455→      <Text style={styles.totalsLabel}>{label}</Text>
+   456→      <Text style={styles.totalsValue}>{value}</Text>
+   457→    </View>
+   458→  );
+   459→}
+   460→
+   461→// ============================================================
+   462→// 1. FACTURA DE VENTA ELECTRÓNICA
+   463→// ============================================================
+   464→
+   465→interface FacturaPDF {
+   466→  id: string;
+   467→  numero: string;
+   468→  nombreCliente: string;
+   469→  nitCliente: string;
+   470→  fecha: Date | string;
+   471→  fechaVencimiento?: Date | string | null;
+   472→  subtotalBruto: number;
+   473→  descuentoTotal: number;
+   474→  subtotalNeto: number;
+   475→  totalIva: number;
+   476→  totalImpoconsumo: number;
+   477→  total: number;
+   478→  cufe?: string | null;
+   479→  qrCode?: string | null;
+   480→  estadoDIAN?: string | null;
+   481→  formaPago?: string | null;
+   482→  saldoPendiente?: number;
+   483→  estado?: string | null;
+   484→  observaciones?: string | null;
+   485→  detalles?: any[];
+   486→  tercero?: any | null;
+   487→}
+   488→
+   489→export async function generarPDFFactura(
+   490→  factura: FacturaPDF,
+   491→  empresa: EmpresaInfo,
+   492→): Promise<Buffer> {
+   493→  const detalles =
+   494→    factura.detalles ??
+   495→    (await db.detalleFacturaVenta.findMany({
+   496→      where: { facturaId: factura.id },
+   497→      orderBy: { id: "asc" },
+   498→    }));
+   499→
+   500→  const doc = (
+   501→    <Document
+   502→      title={`Factura ${factura.numero}`}
+   503→      author={empresa.razonSocial}
+   504→    >
+   505→      <Page size="LETTER" style={styles.page}>
+   506→        <Header
+   507→          empresa={empresa}
+   508→          titulo={"Factura de Venta Electrónica"}
+   509→          subtitulo={`Documento equivalente electrónico · NIT ${empresa.nit}`}
+   510→          numero={factura.numero}
+   511→        />
+   512→
+   513→        {/* Cliente + datos factura */}
+   514→        <View style={styles.boxRow}>
+   515→          <View style={[styles.boxCol, { flex: 2 }]}>
+   516→            <Text style={styles.boxLabel}>Cliente</Text>
+   517→            <Text style={styles.boxValue}>{factura.nombreCliente}</Text>
+   518→            <Text style={[styles.boxValue, { fontWeight: "normal" }]}>
+   519→              NIT/CC: {factura.nitCliente}
+   520→            </Text>
+   521→            {factura.tercero?.direccion && (
+   522→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   523→                {factura.tercero.direccion}
+   524→              </Text>
+   525→            )}
+   526→            {factura.tercero?.telefono && (
+   527→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   528→                Tel: {factura.tercero.telefono}
+   529→              </Text>
+   530→            )}
+   531→          </View>
+   532→          <View style={styles.boxCol}>
+   533→            <Text style={styles.boxLabel}>Fecha emisión</Text>
+   534→            <Text style={styles.boxValue}>{fmtFecha(factura.fecha)}</Text>
+   535→            <Text style={[styles.boxLabel, { marginTop: 4 }]}>Vence</Text>
+   536→            <Text style={styles.boxValue}>
+   537→              {fmtFecha(factura.fechaVencimiento)}
+   538→            </Text>
+   539→          </View>
+   540→          <View style={styles.boxCol}>
+   541→            <Text style={styles.boxLabel}>Forma de pago</Text>
+   542→            <Text style={styles.boxValue}>{factura.formaPago ?? "—"}</Text>
+   543→            <Text style={[styles.boxLabel, { marginTop: 4 }]}>Estado DIAN</Text>
+   544→            <Text style={[styles.badgeBox, { alignSelf: "flex-start", marginTop: 2, backgroundColor: factura.estadoDIAN === "aceptado" ? COLORS.primary : COLORS.warning }]}>
+   545→              {(factura.estadoDIAN ?? "—").toUpperCase()}
+   546→            </Text>
+   547→          </View>
+   548→        </View>
+   549→
+   550→        {/* Items */}
+   551→        <View style={styles.section}>
+   552→          <Text style={styles.sectionTitle}>Detalle de items</Text>
+   553→          <TablePDF
+   554→            columns={[
+   555→              {
+   556→                label: "#",
+   557→                width: "5%",
+   558→                align: "center",
+   559→                render: (_r, i) => String(i + 1),
+   560→              },
+   561→              {
+   562→                label: "Descripción",
+   563→                width: "45%",
+   564→                render: (r) => r.descripcion,
+   565→              },
+   566→              {
+   567→                label: "Cant.",
+   568→                width: "8%",
+   569→                align: "right",
+   570→                render: (r) => fmtNumber(r.cantidad, 2),
+   571→              },
+   572→              {
+   573→                label: "Vr. Unit.",
+   574→                width: "14%",
+   575→                align: "right",
+   576→                render: (r) => fmtCOP(r.precioUnitario),
+   577→              },
+   578→              {
+   579→                label: "% Dto",
+   580→                width: "6%",
+   581→                align: "right",
+   582→                render: (r) =>
+   583→                  r.descuentoPorcentaje > 0
+   584→                    ? `${r.descuentoPorcentaje}%`
+   585→                    : "—",
+   586→              },
+   587→              {
+   588→                label: "% IVA",
+   589→                width: "6%",
+   590→                align: "right",
+   591→                render: (r) => `${r.tarifaIva}%`,
+   592→              },
+   593→              {
+   594→                label: "Total",
+   595→                width: "16%",
+   596→                align: "right",
+   597→                render: (r) => fmtCOP(r.total),
+   598→              },
+   599→            ]}
+   600→            rows={detalles}
+   601→          />
+   602→        </View>
+   603→
+   604→        {/* Totales */}
+   605→        <View style={styles.totalsTable}>
+   606→          <TotalRow label="Subtotal bruto" value={fmtCOP(factura.subtotalBruto)} />
+   607→          {factura.descuentoTotal > 0 && (
+   608→            <TotalRow
+   609→              label="Descuento"
+   610→              value={`- ${fmtCOP(factura.descuentoTotal)}`}
+   611→            />
+   612→          )}
+   613→          <TotalRow label="Subtotal neto" value={fmtCOP(factura.subtotalNeto)} />
+   614→          <TotalRow label="IVA" value={fmtCOP(factura.totalIva)} />
+   615→          {factura.totalImpoconsumo > 0 && (
+   616→            <TotalRow
+   617→              label="Impoconsumo"
+   618→              value={fmtCOP(factura.totalImpoconsumo)}
+   619→            />
+   620→          )}
+   621→          <TotalRow label="TOTAL A PAGAR" value={fmtCOP(factura.total)} bold />
+   622→          {(factura.saldoPendiente ?? 0) > 0 && (
+   623→            <TotalRow
+   624→              label="Saldo pendiente"
+   625→              value={fmtCOP(factura.saldoPendiente ?? 0)}
+   626→            />
+   627→          )}
+   628→        </View>
+   629→
+   630→        {/* CUFE + QR */}
+   631→        <View style={styles.boxRow}>
+   632→          <View style={[styles.boxCol, { flex: 3 }]}>
+   633→            <Text style={styles.boxLabel}>CUFE — Código Único de Factura Electrónica</Text>
+   634→            <Text style={styles.cufeValue}>
+   635→              {factura.cufe ?? "Sin generar"}
+   636→            </Text>
+   637→            {factura.qrCode && (
+   638→              <Text style={[styles.notaText, { marginTop: 4 }]}>
+   639→                QR DIAN: {factura.qrCode}
+   640→              </Text>
+   641→            )}
+   642→          </View>
+   643→          <View style={styles.qrPlaceholder}>
+   644→            <Text style={styles.qrText}>
+   645→              [QR DIAN]{"\n"}
+   646→              {factura.cufe ? factura.cufe.slice(0, 16) + "..." : "—"}
+   647→            </Text>
+   648→          </View>
+   649→        </View>
+   650→
+   651→        {/* Observaciones */}
+   652→        {factura.observaciones && (
+   653→          <View style={{ marginTop: 8 }}>
+   654→            <Text style={styles.sectionTitle}>Observaciones</Text>
+   655→            <Text style={{ fontSize: 8 }}>{factura.observaciones}</Text>
+   656→          </View>
+   657→        )}
+   658→
+   659→        <View style={styles.stampBox}>
+   660→          <Text style={styles.stampText}>
+   661→            {factura.estado === "anulada" ? "FACTURA ANULADA" : "DOCUMENTO EQUIVALENTE ELECTRÓNICO"}
+   662→          </Text>
+   663→          <Text style={styles.notaText}>
+   664→            Este documento es una representación gráfica de la factura electrónica.
+   665→            Validez fiscal según Resolución DIAN vigente.
+   666→          </Text>
+   667→        </View>
+   668→
+   669→        <Footer />
+   670→      </Page>
+   671→    </Document>
+   672→  );
+   673→
+   674→  return await renderToBuffer(doc);
+   675→}
+   676→
+   677→// ============================================================
+   678→// 2. RECIBO DE CAJA (Comprobante de Ingreso)
+   679→// ============================================================
+   680→
+   681→export async function generarPDFReciboCaja(
+   682→  recibo: any,
+   683→  empresa: EmpresaInfo,
+   684→): Promise<Buffer> {
+   685→  const doc = (
+   686→    <Document title={`Recibo ${recibo.numero}`} author={empresa.razonSocial}>
+   687→      <Page size="LETTER" style={styles.page}>
+   688→        <Header
+   689→          empresa={empresa}
+   690→          titulo={"Recibo de Caja"}
+   691→          subtitulo={"Comprobante de Ingreso · CXC"}
+   692→          numero={recibo.numero}
+   693→        />
+   694→        <View style={styles.boxRow}>
+   695→          <View style={[styles.boxCol, { flex: 2 }]}>
+   696→            <Text style={styles.boxLabel}>Recibido de</Text>
+   697→            <Text style={styles.boxValue}>{recibo.nombreTercero}</Text>
+   698→            {recibo.tercero?.numeroDocumento && (
+   699→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   700→                Doc: {recibo.tercero.numeroDocumento}
+   701→              </Text>
+   702→            )}
+   703→            {recibo.tercero?.direccion && (
+   704→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   705→                {recibo.tercero.direccion}
+   706→              </Text>
+   707→            )}
+   708→          </View>
+   709→          <View style={styles.boxCol}>
+   710→            <Text style={styles.boxLabel}>Fecha</Text>
+   711→            <Text style={styles.boxValue}>{fmtFecha(recibo.fecha)}</Text>
+   712→            <Text style={[styles.boxLabel, { marginTop: 4 }]}>Forma de pago</Text>
+   713→            <Text style={styles.boxValue}>{recibo.formaPago}</Text>
+   714→          </View>
+   715→        </View>
+   716→
+   717→        <View style={styles.section}>
+   718→          <Text style={styles.sectionTitle}>Detalle del ingreso</Text>
+   719→          <View style={[styles.boxCol, { marginHorizontal: 0 }]}>
+   720→            <Text style={styles.boxLabel}>Concepto</Text>
+   721→            <Text style={{ fontSize: 9, marginTop: 2 }}>
+   722→              {recibo.concepto || "—"}
+   723→            </Text>
+   724→            {recibo.observaciones && (
+   725→              <>
+   726→                <Text style={[styles.boxLabel, { marginTop: 4 }]}>
+   727→                  Observaciones
+   728→                </Text>
+   729→                <Text style={{ fontSize: 8, marginTop: 2 }}>
+   730→                  {recibo.observaciones}
+   731→                </Text>
+   732→              </>
+   733→            )}
+   734→          </View>
+   735→        </View>
+   736→
+   737→        <View style={[styles.totalsTable, { width: "60%", marginTop: 16 }]}>
+   738→          <TotalRow
+   739→            label="Valor recibido"
+   740→            value={fmtCOP(recibo.valorTotal)}
+   741→            bold
+   742→          />
+   743→        </View>
+   744→
+   745→        <View style={[styles.boxRow, { marginTop: 32 }]}>
+   746→          <View style={[styles.boxCol, { flex: 1 }]}>
+   747→            <Text style={styles.boxLabel}>Firma recibido</Text>
+   748→            <View
+   749→              style={{
+   750→                marginTop: 32,
+   751→                borderTopWidth: 0.5,
+   752→                borderTopColor: COLORS.border,
+   753→                paddingTop: 2,
+   754→              }}
+   755→            >
+   756→              <Text style={{ fontSize: 7 }}>{empresa.razonSocial}</Text>
+   757→            </View>
+   758→          </View>
+   759→          <View style={[styles.boxCol, { flex: 1 }]}>
+   760→            <Text style={styles.boxLabel}>Firma pagador</Text>
+   761→            <View
+   762→              style={{
+   763→                marginTop: 32,
+   764→                borderTopWidth: 0.5,
+   765→                borderTopColor: COLORS.border,
+   766→                paddingTop: 2,
+   767→              }}
+   768→            >
+   769→              <Text style={{ fontSize: 7 }}>{recibo.nombreTercero}</Text>
+   770→            </View>
+   771→          </View>
+   772→        </View>
+   773→
+   774→        <View style={styles.stampBox}>
+   775→          <Text style={styles.stampText}>RECIBO DE CAJA · {recibo.numero}</Text>
+   776→        </View>
+   777→
+   778→        <Footer />
+   779→      </Page>
+   780→    </Document>
+   781→  );
+   782→  return await renderToBuffer(doc);
+   783→}
+   784→
+   785→// ============================================================
+   786→// 3. COMPROBANTE DE EGRESO
+   787→// ============================================================
+   788→
+   789→export async function generarPDFComprobanteEgreso(
+   790→  egreso: any,
+   791→  empresa: EmpresaInfo,
+   792→): Promise<Buffer> {
+   793→  const doc = (
+   794→    <Document title={`Egreso ${egreso.numero}`} author={empresa.razonSocial}>
+   795→      <Page size="LETTER" style={styles.page}>
+   796→        <Header
+   797→          empresa={empresa}
+   798→          titulo={"Comprobante de Egreso"}
+   799→          subtitulo={"Pago · CXP"}
+   800→          numero={egreso.numero}
+   801→        />
+   802→        <View style={styles.boxRow}>
+   803→          <View style={[styles.boxCol, { flex: 2 }]}>
+   804→            <Text style={styles.boxLabel}>Pagado a</Text>
+   805→            <Text style={styles.boxValue}>{egreso.nombreTercero}</Text>
+   806→            {egreso.tercero?.numeroDocumento && (
+   807→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   808→                Doc: {egreso.tercero.numeroDocumento}
+   809→              </Text>
+   810→            )}
+   811→            {egreso.tercero?.direccion && (
+   812→              <Text style={{ fontSize: 8, color: COLORS.textMuted }}>
+   813→                {egreso.tercero.direccion}
+   814→              </Text>
+   815→            )}
+   816→          </View>
+   817→          <View style={styles.boxCol}>
+   818→            <Text style={styles.boxLabel}>Fecha</Text>
+   819→            <Text style={styles.boxValue}>{fmtFecha(egreso.fecha)}</Text>
+   820→            <Text style={[styles.boxLabel, { marginTop: 4 }]}>Forma de pago</Text>
+   821→            <Text style={styles.boxValue}>{egreso.formaPago}</Text>
+   822→          </View>
+   823→        </View>
+   824→
+   825→        <View style={styles.section}>
+   826→          <Text style={styles.sectionTitle}>Detalle del egreso</Text>
+   827→          <View style={[styles.boxCol, { marginHorizontal: 0 }]}>
+   828→            <Text style={styles.boxLabel}>Concepto</Text>
+   829→            <Text style={{ fontSize: 9, marginTop: 2 }}>
+   830→              {egreso.concepto || "—"}
+   831→            </Text>
+   832→            {egreso.observaciones && (
+   833→              <>
+   834→                <Text style={[styles.boxLabel, { marginTop: 4 }]}>
+   835→                  Observaciones
+   836→                </Text>
+   837→                <Text style={{ fontSize: 8, marginTop: 2 }}>
+   838→                  {egreso.observaciones}
+   839→                </Text>
+   840→              </>
+   841→            )}
+   842→          </View>
+   843→        </View>
+   844→
+   845→        <View style={[styles.totalsTable, { width: "60%", marginTop: 16 }]}>
+   846→          <TotalRow label="Valor pagado" value={fmtCOP(egreso.valorTotal)} bold />
+   847→        </View>
+   848→
+   849→        <View style={[styles.boxRow, { marginTop: 32 }]}>
+   850→          <View style={[styles.boxCol, { flex: 1 }]}>
+   851→            <Text style={styles.boxLabel}>Elaborado por</Text>
+   852→            <View
+   853→              style={{
+   854→                marginTop: 32,
+   855→                borderTopWidth: 0.5,
+   856→                borderTopColor: COLORS.border,
+   857→                paddingTop: 2,
+   858→              }}
+   859→            >
+   860→              <Text style={{ fontSize: 7 }}>{empresa.razonSocial}</Text>
+   861→            </View>
+   862→          </View>
+   863→          <View style={[styles.boxCol, { flex: 1 }]}>
+   864→            <Text style={styles.boxLabel}>Firma beneficiario</Text>
+   865→            <View
+   866→              style={{
+   867→                marginTop: 32,
+   868→                borderTopWidth: 0.5,
+   869→                borderTopColor: COLORS.border,
+   870→                paddingTop: 2,
+   871→              }}
+   872→            >
+   873→              <Text style={{ fontSize: 7 }}>{egreso.nombreTercero}</Text>
+   874→            </View>
+   875→          </View>
+   876→        </View>
+   877→
+   878→        <View style={styles.stampBox}>
+   879→          <Text style={styles.stampText}>COMPROBANTE DE EGRESO · {egreso.numero}</Text>
+   880→        </View>
+   881→
+   882→        <Footer />
+   883→      </Page>
+   884→    </Document>
+   885→  );
+   886→  return await renderToBuffer(doc);
+   887→}
+   888→
+   889→// ============================================================
+   890→// 4. BALANCE DE PRUEBA
+   891→// ============================================================
+   892→
+   893→export async function generarPDFBalancePrueba(
+   894→  empresaId: string,
+   895→): Promise<Buffer> {
+   896→  const empresa = await cargarEmpresa(empresaId);
+   897→  if (!empresa) throw new Error("Empresa no encontrada");
+   898→
+   899→  const cuentas = await db.cuentaPuc.findMany({
+   900→    where: { empresaId },
+   901→    orderBy: { codigo: "asc" },
+   902→  });
+   903→  const movs = await db.movimientoContable.findMany({
+   904→    where: {
+   905→      empresaId,
+   906→      comprobante: { estado: "contabilizado" },
+   907→    },
+   908→    select: { cuentaId: true, debito: true, credito: true },
+   909→  });
+   910→  const sumas: Record<string, { debito: number; credito: number }> = {};
+   911→  for (const m of movs) {
+   912→    const cur = sumas[m.cuentaId] ?? { debito: 0, credito: 0 };
+   913→    cur.debito += m.debito;
+   914→    cur.credito += m.credito;
+   915→    sumas[m.cuentaId] = cur;
+   916→  }
+   917→  const rows = cuentas.map((c) => {
+   918→    const s = sumas[c.id] ?? { debito: 0, credito: 0 };
+   919→    const saldo = round(
+   920→      c.naturaleza === "debito" ? s.debito - s.credito : s.credito - s.debito,
+   921→      2,
+   922→    );
+   923→    return {
+   924→      ...c,
+   925→      debito: round(s.debito, 2),
+   926→      credito: round(s.credito, 2),
+   927→      saldo,
+   928→    };
+   929→  });
+   930→  const filtradas = rows.filter(
+   931→    (r) => r.debito !== 0 || r.credito !== 0 || r.nivel <= 2,
+   932→  );
+   933→  const totalDebito = round(
+   934→    filtradas.reduce((a, b) => a + b.debito, 0),
+   935→    2,
+   936→  );
+   937→  const totalCredito = round(
+   938→    filtradas.reduce((a, b) => a + b.credito, 0),
+   939→    2,
+   940→  );
+   941→  const diferencia = round(totalDebito - totalCredito, 2);
+   942→
+   943→  const doc = (
+   944→    <Document title="Balance de Prueba" author={empresa.razonSocial}>
+   945→      <Page size="LETTER" style={styles.page}>
+   946→        <Header
+   947→          empresa={empresa}
+   948→          titulo={"Balance de Prueba"}
+   949→          subtitulo={`Corte a ${fmtFecha(new Date())} · ${filtradas.length} cuentas`}
+   950→        />
+   951→        <View style={styles.section}>
+   952→          <TablePDF
+   953→            columns={[
+   954→              {
+   955→                label: "Código",
+   956→                width: "12%",
+   957→                render: (r) => r.codigo,
+   958→              },
+   959→              {
+   960→                label: "Nombre",
+   961→                width: "42%",
+   962→                render: (r) =>
+   963→                  `${"  ".repeat(Math.max(0, (r.nivel ?? 1) - 1))}${r.nombre}`,
+   964→              },
+   965→              {
+   966→                label: "Naturaleza",
+   967→                width: "11%",
+   968→                align: "center",
+   969→                render: (r) => r.naturaleza,
+   970→              },
+   971→              {
+   972→                label: "Débitos",
+   973→                width: "12%",
+   974→                align: "right",
+   975→                render: (r) => fmtNumber(r.debito, 2),
+   976→              },
+   977→              {
+   978→                label: "Créditos",
+   979→                width: "12%",
+   980→                align: "right",
+   981→                render: (r) => fmtNumber(r.credito, 2),
+   982→              },
+   983→              {
+   984→                label: "Saldo",
+   985→                width: "11%",
+   986→                align: "right",
+   987→                render: (r) => fmtNumber(r.saldo, 2),
+   988→              },
+   989→            ]}
+   990→            rows={filtradas}
+   991→          />
+   992→        </View>
+   993→        <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
+   994→          <TotalRow
+   995→            label="Total débitos"
+   996→            value={fmtNumber(totalDebito, 2)}
+   997→            bold
+   998→          />
+   999→          <TotalRow
+  1000→            label="Total créditos"
+  1001→            value={fmtNumber(totalCredito, 2)}
+  1002→            bold
+  1003→          />
+  1004→          <TotalRow
+  1005→            label="Diferencia"
+  1006→            value={fmtNumber(diferencia, 2)}
+  1007→            bold
+  1008→          />
+  1009→        </View>
+  1010→        {Math.abs(diferencia) > 1 && (
+  1011→          <View style={[styles.stampBox, { borderColor: COLORS.danger }]}>
+  1012→            <Text style={styles.stampText}>BALANCE DESCUADRADO</Text>
+  1013→          </View>
+  1014→        )}
+  1015→        <Footer />
+  1016→      </Page>
+  1017→    </Document>
+  1018→  );
+  1019→  return await renderToBuffer(doc);
+  1020→}
+  1021→
+  1022→// ============================================================
+  1023→// 5. LIBRO DIARIO (comprobantes en rango)
+  1024→// ============================================================
+  1025→
+  1026→export async function generarPDFLibroDiario(
+  1027→  empresaId: string,
+  1028→  fechaInicio?: Date,
+  1029→  fechaFin?: Date,
+  1030→): Promise<Buffer> {
+  1031→  const empresa = await cargarEmpresa(empresaId);
+  1032→  if (!empresa) throw new Error("Empresa no encontrada");
+  1033→
+  1034→  const where: any = { empresaId, estado: "contabilizado" };
+  1035→  if (fechaInicio || fechaFin) {
+  1036→    where.fecha = {};
+  1037→    if (fechaInicio) where.fecha.gte = fechaInicio;
+  1038→    if (fechaFin) where.fecha.lte = fechaFin;
+  1039→  }
+  1040→  const comprobantes = await db.comprobante.findMany({
+  1041→    where,
+  1042→    orderBy: { fecha: "asc" },
+  1043→    include: {
+  1044→      movimientos: {
+  1045→        include: { cuenta: true, tercero: true },
+  1046→        orderBy: { debito: "desc" },
+  1047→      },
+  1048→    },
+  1049→  });
+  1050→
+  1051→  const rangoLabel =
+  1052→    fechaInicio || fechaFin
+  1053→      ? `${fmtFecha(fechaInicio)} → ${fmtFecha(fechaFin)}`
+  1054→      : "Todos los períodos";
+  1055→
+  1056→  const totalDebito = round(
+  1057→    comprobantes.reduce((a, c) => a + c.totalDebito, 0),
+  1058→    2,
+  1059→  );
+  1060→  const totalCredito = round(
+  1061→    comprobantes.reduce((a, c) => a + c.totalCredito, 0),
+  1062→    2,
+  1063→  );
+  1064→
+  1065→  const doc = (
+  1066→    <Document title="Libro Diario" author={empresa.razonSocial}>
+  1067→      <Page size="LETTER" style={styles.page}>
+  1068→        <Header
+  1069→          empresa={empresa}
+  1070→          titulo={"Libro Diario"}
+  1071→          subtitulo={`${rangoLabel} · ${comprobantes.length} comprobantes`}
+  1072→        />
+  1073→        {comprobantes.map((c) => (
+  1074→          <View key={c.id} style={{ marginBottom: 8 }} wrap={false}>
+  1075→            <View
+  1076→              style={{
+  1077→                flexDirection: "row",
+  1078→                backgroundColor: COLORS.primary,
+  1079→                padding: 4,
+  1080→                borderRadius: 2,
+  1081→              }}
+  1082→            >
+  1083→              <Text
+  1084→                style={{
+  1085→                  color: "#fff",
+  1086→                  fontSize: 8,
+  1087→                  fontWeight: "bold",
+  1088→                  flex: 2,
+  1089→                }}
+  1090→              >
+  1091→                {c.numero} · {c.tipo}
+  1092→              </Text>
+  1093→              <Text style={{ color: "#fff", fontSize: 8, flex: 2 }}>
+  1094→                {fmtFecha(c.fecha)}
+  1095→              </Text>
+  1096→              <Text
+  1097→                style={{
+  1098→                  color: "#fff",
+  1099→                  fontSize: 8,
+  1100→                  flex: 4,
+  1101→                  fontWeight: "bold",
+  1102→                }}
+  1103→              >
+  1104→                {c.descripcion ?? ""}
+  1105→              </Text>
+  1106→              <Text
+  1107→                style={{
+  1108→                  color: "#fff",
+  1109→                  fontSize: 8,
+  1110→                  flex: 2,
+  1111→                  textAlign: "right",
+  1112→                }}
+  1113→              >
+  1114→                {fmtNumber(c.totalDebito, 2)} / {fmtNumber(c.totalCredito, 2)}
+  1115→              </Text>
+  1116→            </View>
+  1117→            <TablePDF
+  1118→              columns={[
+  1119→                {
+  1120→                  label: "Cuenta",
+  1121→                  width: "12%",
+  1122→                  render: (r) => r.cuenta?.codigo ?? "—",
+  1123→                },
+  1124→                {
+  1125→                  label: "Descripción",
+  1126→                  width: "44%",
+  1127→                  render: (r) =>
+  1128→                    r.descripcion ?? r.cuenta?.nombre ?? "",
+  1129→                },
+  1130→                {
+  1131→                  label: "Tercero",
+  1132→                  width: "20%",
+  1133→                  render: (r) => r.tercero?.nombre ?? "",
+  1134→                },
+  1135→                {
+  1136→                  label: "Débito",
+  1137→                  width: "12%",
+  1138→                  align: "right",
+  1139→                  render: (r) => (r.debito ? fmtNumber(r.debito, 2) : ""),
+  1140→                },
+  1141→                {
+  1142→                  label: "Crédito",
+  1143→                  width: "12%",
+  1144→                  align: "right",
+  1145→                  render: (r) => (r.credito ? fmtNumber(r.credito, 2) : ""),
+  1146→                },
+  1147→              ]}
+  1148→              rows={c.movimientos}
+  1149→            />
+  1150→          </View>
+  1151→        ))}
+  1152→        {comprobantes.length === 0 && (
+  1153→          <Text style={{ fontSize: 9, color: COLORS.textMuted }}>
+  1154→            No hay comprobantes contabilizados en el rango seleccionado.
+  1155→          </Text>
+  1156→        )}
+  1157→        <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
+  1158→          <TotalRow label="Total débitos del período" value={fmtNumber(totalDebito, 2)} bold />
+  1159→          <TotalRow label="Total créditos del período" value={fmtNumber(totalCredito, 2)} bold />
+  1160→        </View>
+  1161→        <Footer />
+  1162→      </Page>
+  1163→    </Document>
+  1164→  );
+  1165→  return await renderToBuffer(doc);
+  1166→}
+  1167→
+  1168→// ============================================================
+  1169→// 6. LIBRO MAYOR (detalle de una cuenta con saldos acumulados)
+  1170→// ============================================================
+  1171→
+  1172→export async function generarPDFLibroMayor(
+  1173→  cuentaId: string,
+  1174→  empresaId: string,
+  1175→  fechaInicio?: Date,
+  1176→  fechaFin?: Date,
+  1177→): Promise<Buffer> {
+  1178→  const empresa = await cargarEmpresa(empresaId);
+  1179→  if (!empresa) throw new Error("Empresa no encontrada");
+  1180→
+  1181→  const cuenta = await db.cuentaPuc.findFirst({
+  1182→    where: { id: cuentaId, empresaId },
+  1183→  });
+  1184→  if (!cuenta) throw new Error("Cuenta no encontrada");
+  1185→
+  1186→  const where: any = {
+  1187→    empresaId,
+  1188→    cuentaId,
+  1189→    comprobante: { estado: "contabilizado" },
+  1190→  };
+  1191→  if (fechaInicio || fechaFin) {
+  1192→    where.fecha = {};
+  1193→    if (fechaInicio) where.fecha.gte = fechaInicio;
+  1194→    if (fechaFin) where.fecha.lte = fechaFin;
+  1195→  }
+  1196→  const movs = await db.movimientoContable.findMany({
+  1197→    where,
+  1198→    orderBy: { fecha: "asc" },
+  1199→    include: { comprobante: true, tercero: true },
+  1200→  });
+  1201→
+  1202→  // Saldo anterior (movimientos antes de fechaInicio)
+  1203→  let saldoAnterior = 0;
+  1204→  if (fechaInicio) {
+  1205→    const prev = await db.movimientoContable.aggregate({
+  1206→      where: {
+  1207→        empresaId,
+  1208→        cuentaId,
+  1209→        fecha: { lt: fechaInicio },
+  1210→        comprobante: { estado: "contabilizado" },
+  1211→      },
+  1212→      _sum: { debito: true, credito: true },
+  1213→    });
+  1214→    const deb = prev._sum.debito ?? 0;
+  1215→    const cre = prev._sum.credito ?? 0;
+  1216→    saldoAnterior = round(
+  1217→      cuenta.naturaleza === "debito" ? deb - cre : cre - deb,
+  1218→      2,
+  1219→    );
+  1220→  }
+  1221→
+  1222→  let saldo = saldoAnterior;
+  1223→  const rows = movs.map((m) => {
+  1224→    saldo = round(saldo + m.debito - m.credito, 2);
+  1225→    return { ...m, saldo };
+  1226→  });
+  1227→
+  1228→  const totalDebito = round(movs.reduce((a, m) => a + m.debito, 0), 2);
+  1229→  const totalCredito = round(movs.reduce((a, m) => a + m.credito, 0), 2);
+  1230→
+  1231→  const doc = (
+  1232→    <Document title={`Libro Mayor ${cuenta.codigo}`} author={empresa.razonSocial}>
+  1233→      <Page size="LETTER" style={styles.page}>
+  1234→        <Header
+  1235→          empresa={empresa}
+  1236→          titulo={"Libro Mayor"}
+  1237→          subtitulo={`${cuenta.codigo} · ${cuenta.nombre} · Naturaleza: ${cuenta.naturaleza}`}
+  1238→        />
+  1239→        <View style={styles.boxRow}>
+  1240→          <View style={styles.boxCol}>
+  1241→            <Text style={styles.boxLabel}>Cuenta</Text>
+  1242→            <Text style={styles.boxValue}>{cuenta.codigo}</Text>
+  1243→            <Text style={{ fontSize: 8 }}>{cuenta.nombre}</Text>
+  1244→          </View>
+  1245→          <View style={styles.boxCol}>
+  1246→            <Text style={styles.boxLabel}>Saldo inicial</Text>
+  1247→            <Text style={styles.boxValue}>{fmtNumber(saldoAnterior, 2)}</Text>
+  1248→          </View>
+  1249→          <View style={styles.boxCol}>
+  1250→            <Text style={styles.boxLabel}>Movimientos</Text>
+  1251→            <Text style={styles.boxValue}>{movs.length}</Text>
+  1252→          </View>
+  1253→        </View>
+  1254→
+  1255→        <View style={styles.section}>
+  1256→          <TablePDF
+  1257→            columns={[
+  1258→              {
+  1259→                label: "Fecha",
+  1260→                width: "12%",
+  1261→                render: (r) => fmtFecha(r.fecha),
+  1262→              },
+  1263→              {
+  1264→                label: "Comprobante",
+  1265→                width: "18%",
+  1266→                render: (r) => r.comprobante?.numero ?? "—",
+  1267→              },
+  1268→              {
+  1269→                label: "Descripción",
+  1270→                width: "30%",
+  1271→                render: (r) =>
+  1272→                  r.descripcion ?? r.comprobante?.descripcion ?? "",
+  1273→              },
+  1274→              {
+  1275→                label: "Tercero",
+  1276→                width: "16%",
+  1277→                render: (r) => r.tercero?.nombre ?? "",
+  1278→              },
+  1279→              {
+  1280→                label: "Débito",
+  1281→                width: "12%",
+  1282→                align: "right",
+  1283→                render: (r) => (r.debito ? fmtNumber(r.debito, 2) : ""),
+  1284→              },
+  1285→              {
+  1286→                label: "Crédito",
+  1287→                width: "12%",
+  1288→                align: "right",
+  1289→                render: (r) => (r.credito ? fmtNumber(r.credito, 2) : ""),
+  1290→              },
+  1291→            ]}
+  1292→            rows={rows}
+  1293→          />
+  1294→        </View>
+  1295→
+  1296→        <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
+  1297→          <TotalRow label="Saldo inicial" value={fmtNumber(saldoAnterior, 2)} />
+  1298→          <TotalRow label="Total débitos" value={fmtNumber(totalDebito, 2)} />
+  1299→          <TotalRow label="Total créditos" value={fmtNumber(totalCredito, 2)} />
+  1300→          <TotalRow label="Saldo final" value={fmtNumber(saldo, 2)} bold />
+  1301→        </View>
+  1302→        <Footer />
+  1303→      </Page>
+  1304→    </Document>
+  1305→  );
+  1306→  return await renderToBuffer(doc);
+  1307→}
+  1308→
+  1309→// ============================================================
+  1310→// 7. KARDEX VALORIZADO
+  1311→// ============================================================
+  1312→
+  1313→export async function generarPDFKardex(
+  1314→  productoId: string,
+  1315→  empresaId: string,
+  1316→  bodegaId?: string,
+  1317→  fechaInicio?: Date,
+  1318→  fechaFin?: Date,
+  1319→): Promise<Buffer> {
+  1320→  const empresa = await cargarEmpresa(empresaId);
+  1321→  if (!empresa) throw new Error("Empresa no encontrada");
+  1322→
+  1323→  const producto = await db.producto.findFirst({
+  1324→    where: { id: productoId, empresaId },
+  1325→  });
+  1326→  if (!producto) throw new Error("Producto no encontrado");
+  1327→  const bodega = bodegaId
+  1328→    ? await db.bodega.findFirst({ where: { id: bodegaId, empresaId } })
+  1329→    : null;
+  1330→
+  1331→  // Saldo anterior
+  1332→  const wherePrev: any = { empresaId, productoId };
+  1333→  if (bodegaId) wherePrev.bodegaId = bodegaId;
+  1334→  if (fechaInicio) wherePrev.fecha = { lt: fechaInicio };
+  1335→  const prevMovs = await db.movimientoInventario.findMany({
+  1336→    where: wherePrev,
+  1337→  });
+  1338→  let salAntCantidad = round(
+  1339→    prevMovs.reduce((a, m) => a + m.cantidad, 0),
+  1340→    4,
+  1341→  );
+  1342→  let salAntValor = round(
+  1343→    prevMovs.reduce((a, m) => a + m.costoTotal, 0),
+  1344→    2,
+  1345→  );
+  1346→
+  1347→  const where: any = { empresaId, productoId };
+  1348→  if (bodegaId) where.bodegaId = bodegaId;
+  1349→  if (fechaInicio || fechaFin) {
+  1350→    where.fecha = {};
+  1351→    if (fechaInicio) where.fecha.gte = fechaInicio;
+  1352→    if (fechaFin) where.fecha.lte = fechaFin;
+  1353→  }
+  1354→  const movs = await db.movimientoInventario.findMany({
+  1355→    where,
+  1356→    orderBy: { fecha: "asc" },
+  1357→    include: { bodega: true },
+  1358→  });
+  1359→
+  1360→  let saldoC = salAntCantidad;
+  1361→  let saldoV = salAntValor;
+  1362→  const rows = movs.map((m) => {
+  1363→    saldoC = round(saldoC + m.cantidad, 4);
+  1364→    saldoV = round(saldoV + m.costoTotal, 2);
+  1365→    return {
+  1366→      ...m,
+  1367→      entradaCantidad: m.cantidad > 0 ? Math.abs(m.cantidad) : 0,
+  1368→      entradaValor: m.cantidad > 0 ? Math.abs(m.costoTotal) : 0,
+  1369→      salidaCantidad: m.cantidad < 0 ? Math.abs(m.cantidad) : 0,
+  1370→      salidaValor: m.cantidad < 0 ? Math.abs(m.costoTotal) : 0,
+  1371→      saldoCantidad: saldoC,
+  1372→      saldoValor: saldoV,
+  1373→    };
+  1374→  });
+  1375→
+  1376→  const rangoLabel =
+  1377→    fechaInicio || fechaFin
+  1378→      ? `${fmtFecha(fechaInicio)} → ${fmtFecha(fechaFin)}`
+  1379→      : "Histórico completo";
+  1380→
+  1381→  const doc = (
+  1382→    <Document title={`Kardex ${producto.codigo}`} author={empresa.razonSocial}>
+  1383→      <Page size="LETTER" orientation="landscape" style={styles.page}>
+  1384→        <Header
+  1385→          empresa={empresa}
+  1386→          titulo={"Kardex Valorizado"}
+  1387→          subtitulo={`Producto ${producto.codigo} · ${producto.nombre} · ${rangoLabel}`}
+  1388→        />
+  1389→        <View style={styles.boxRow}>
+  1390→          <View style={styles.boxCol}>
+  1391→            <Text style={styles.boxLabel}>Producto</Text>
+  1392→            <Text style={styles.boxValue}>{producto.codigo}</Text>
+  1393→            <Text style={{ fontSize: 8 }}>{producto.nombre}</Text>
+  1394→          </View>
+  1395→          <View style={styles.boxCol}>
+  1396→            <Text style={styles.boxLabel}>Bodega</Text>
+  1397→            <Text style={styles.boxValue}>
+  1398→              {bodega ? bodega.nombre : "Todas"}
+  1399→            </Text>
+  1400→          </View>
+  1401→          <View style={styles.boxCol}>
+  1402→            <Text style={styles.boxLabel}>Saldo anterior</Text>
+  1403→            <Text style={styles.boxValue}>
+  1404→              {fmtNumber(salAntCantidad, 2)} ({fmtCOP(salAntValor)})
+  1405→            </Text>
+  1406→          </View>
+  1407→          <View style={styles.boxCol}>
+  1408→            <Text style={styles.boxLabel}>Costo promedio</Text>
+  1409→            <Text style={styles.boxValue}>{fmtCOP(producto.costoPromedio)}</Text>
+  1410→          </View>
+  1411→        </View>
+  1412→
+  1413→        <View style={styles.section}>
+  1414→          <TablePDF
+  1415→            columns={[
+  1416→              {
+  1417→                label: "Fecha",
+  1418→                width: "10%",
+  1419→                render: (r) => fmtFecha(r.fecha),
+  1420→              },
+  1421→              {
+  1422→                label: "Tipo",
+  1423→                width: "9%",
+  1424→                render: (r) => (r.tipo ?? "").toUpperCase(),
+  1425→              },
+  1426→              {
+  1427→                label: "Bodega",
+  1428→                width: "12%",
+  1429→                render: (r) => r.bodega?.nombre ?? "—",
+  1430→              },
+  1431→              {
+  1432→                label: "Doc.",
+  1433→                width: "11%",
+  1434→                render: (r) => r.documentoTipo ?? "",
+  1435→              },
+  1436→              {
+  1437→                label: "Ent. Cant.",
+  1438→                width: "9%",
+  1439→                align: "right",
+  1440→                render: (r) =>
+  1441→                  r.entradaCantidad ? fmtNumber(r.entradaCantidad, 2) : "",
+  1442→              },
+  1443→              {
+  1444→                label: "Ent. Valor",
+  1445→                width: "11%",
+  1446→                align: "right",
+  1447→                render: (r) =>
+  1448→                  r.entradaValor ? fmtCOP(r.entradaValor) : "",
+  1449→              },
+  1450→              {
+  1451→                label: "Sal. Cant.",
+  1452→                width: "9%",
+  1453→                align: "right",
+  1454→                render: (r) =>
+  1455→                  r.salidaCantidad ? fmtNumber(r.salidaCantidad, 2) : "",
+  1456→              },
+  1457→              {
+  1458→                label: "Sal. Valor",
+  1459→                width: "11%",
+  1460→                align: "right",
+  1461→                render: (r) =>
+  1462→                  r.salidaValor ? fmtCOP(r.salidaValor) : "",
+  1463→              },
+  1464→              {
+  1465→                label: "Saldo Cant.",
+  1466→                width: "9%",
+  1467→                align: "right",
+  1468→                render: (r) => fmtNumber(r.saldoCantidad, 2),
+  1469→              },
+  1470→              {
+  1471→                label: "Saldo Valor",
+  1472→                width: "9%",
+  1473→                align: "right",
+  1474→                render: (r) => fmtCOP(r.saldoValor),
+  1475→              },
+  1476→            ]}
+  1477→            rows={rows}
+  1478→          />
+  1479→        </View>
+  1480→
+  1481→        <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
+  1482→          <TotalRow
+  1483→            label="Saldo final"
+  1484→            value={`${fmtNumber(saldoC, 2)} (${fmtCOP(saldoV)})`}
+  1485→            bold
+  1486→          />
+  1487→        </View>
+  1488→        <Footer />
+  1489→      </Page>
+  1490→    </Document>
+  1491→  );
+  1492→  return await renderToBuffer(doc);
+  1493→}
+  1494→
+  1495→// ============================================================
+  1496→// 8. NÓMINA
+  1497→// ============================================================
+  1498→
+  1499→export async function generarPDFNomina(
+  1500→  nominaId: string,
+  1501→  empresaId: string,
+  1502→): Promise<Buffer> {
+  1503→  const empresa = await cargarEmpresa(empresaId);
+  1504→  if (!empresa) throw new Error("Empresa no encontrada");
+  1505→
+  1506→  const nomina = await db.nomina.findFirst({
+  1507→    where: { id: nominaId, empresaId },
+  1508→    include: {
+  1509→      detalles: { orderBy: { createdAt: "asc" } },
+  1510→    },
+  1511→  });
+  1512→  if (!nomina) throw new Error("Nómina no encontrada");
+  1513→
+  1514→  const terceroIds = nomina.detalles.map((d) => d.terceroId);
+  1515→  const terceros = await db.tercero.findMany({
+  1516→    where: { id: { in: terceroIds } },
+  1517→  });
+  1518→  const tMap = new Map(terceros.map((t) => [t.id, t]));
+  1519→
+  1520→  const parseJSON = (s: string | null | undefined): any[] => {
+  1521→    if (!s) return [];
+  1522→    try {
+  1523→      const v = JSON.parse(s);
+  1524→      return Array.isArray(v) ? v : [];
+  1525→    } catch {
+  1526→      return [];
+  1527→    }
+  1528→  };
+  1529→
+  1530→  const detallesCompletos = nomina.detalles.map((d) => {
+  1531→    const t = tMap.get(d.terceroId);
+  1532→    return {
+  1533→      ...d,
+  1534→      tercero: t,
+  1535→      devengos: parseJSON(d.devengos),
+  1536→      deducciones: parseJSON(d.deducciones),
+  1537→      aportes: parseJSON(d.aportesPatronales),
+  1538→      provisiones: parseJSON(d.provisiones),
+  1539→    };
+  1540→  });
+  1541→
+  1542→  const doc = (
+  1543→    <Document title={`Nómina ${nomina.numero}`} author={empresa.razonSocial}>
+  1544→      <Page size="LETTER" style={styles.page}>
+  1545→        <Header
+  1546→          empresa={empresa}
+  1547→          titulo={"Comprobante de Nómina"}
+  1548→          subtitulo={`${nomina.numero} · ${nomina.tipo} · Período ${fmtFecha(nomina.periodoInicio)} → ${fmtFecha(nomina.periodoFin)}`}
+  1549→          numero={nomina.numero}
+  1550→        />
+  1551→        <View style={styles.boxRow}>
+  1552→          <View style={styles.boxCol}>
+  1553→            <Text style={styles.boxLabel}>Tipo</Text>
+  1554→            <Text style={styles.boxValue}>{nomina.tipo}</Text>
+  1555→          </View>
+  1556→          <View style={styles.boxCol}>
+  1557→            <Text style={styles.boxLabel}>Fecha de pago</Text>
+  1558→            <Text style={styles.boxValue}>{fmtFecha(nomina.fechaPago)}</Text>
+  1559→          </View>
+  1560→          <View style={styles.boxCol}>
+  1561→            <Text style={styles.boxLabel}>Empleados</Text>
+  1562→            <Text style={styles.boxValue}>{detallesCompletos.length}</Text>
+  1563→          </View>
+  1564→          <View style={styles.boxCol}>
+  1565→            <Text style={styles.boxLabel}>Estado</Text>
+  1566→            <Text
+  1567→              style={[
+  1568→                styles.badgeBox,
+  1569→                {
+  1570→                  backgroundColor:
+  1571→                    nomina.estado === "pagada"
+  1572→                      ? COLORS.primary
+  1573→                      : nomina.estado === "anulada"
+  1574→                        ? COLORS.danger
+  1575→                        : COLORS.warning,
+  1576→                },
+  1577→              ]}
+  1578→            >
+  1579→              {(nomina.estado ?? "—").toUpperCase()}
+  1580→            </Text>
+  1581→          </View>
+  1582→        </View>
+  1583→
+  1584→        {detallesCompletos.map((d) => {
+  1585→          const nombreCompleto = d.tercero?.nombre ?? "—";
+  1586→          const docEmp = d.tercero?.numeroDocumento ?? "—";
+  1587→          const cargo = d.tercero?.cargo ?? "—";
+  1588→          return (
+  1589→            <View
+  1590→              key={d.id}
+  1591→              style={{ marginBottom: 10, borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 6 }}
+  1592→              wrap={false}
+  1593→            >
+  1594→              <View style={{ flexDirection: "row", marginBottom: 4 }}>
+  1595→                <Text style={{ flex: 2, fontSize: 9, fontWeight: "bold" }}>
+  1596→                  {nombreCompleto}
+  1597→                </Text>
+  1598→                <Text style={{ flex: 2, fontSize: 8, color: COLORS.textMuted }}>
+  1599→                  CC: {docEmp} · {cargo}
+  1600→                </Text>
+  1601→                <Text style={{ flex: 1, fontSize: 8, color: COLORS.textMuted, textAlign: "right" }}>
+  1602→                  Días: {fmtNumber(d.diasLaborados, 0)}
+  1603→                </Text>
+  1604→              </View>
+  1605→              <View style={{ flexDirection: "row" }}>
+  1606→                <View style={{ flex: 1, marginRight: 4 }}>
+  1607→                  <Text style={[styles.sectionTitle, { fontSize: 8, marginBottom: 2 }]}>
+  1608→                    Devengos
+  1609→                  </Text>
+  1610→                  {d.devengos.length === 0 && (
+  1611→                    <Text style={{ fontSize: 7, color: COLORS.textMuted }}>—</Text>
+  1612→                  )}
+  1613→                  {d.devengos.map((c: any, i: number) => (
+  1614→                    <View key={i} style={{ flexDirection: "row", fontSize: 7 }}>
+  1615→                      <Text style={{ flex: 3 }}>{c.nombre}</Text>
+  1616→                      <Text style={{ flex: 2, textAlign: "right" }}>
+  1617→                        {fmtCOP(c.valor)}
+  1618→                      </Text>
+  1619→                    </View>
+  1620→                  ))}
+  1621→                  <View style={[styles.totalsRow, { marginTop: 2 }]}>
+  1622→                    <Text style={[styles.totalsLabel, { fontSize: 7 }]}>
+  1623→                      Total devengado
+  1624→                    </Text>
+  1625→                    <Text style={[styles.totalsValue, { fontSize: 7 }]}>
+  1626→                      {fmtCOP(d.totalDevengado)}
+  1627→                    </Text>
+  1628→                  </View>
+  1629→                </View>
+  1630→                <View style={{ flex: 1 }}>
+  1631→                  <Text style={[styles.sectionTitle, { fontSize: 8, marginBottom: 2 }]}>
+  1632→                    Deducciones
+  1633→                  </Text>
+  1634→                  {d.deducciones.length === 0 && (
+  1635→                    <Text style={{ fontSize: 7, color: COLORS.textMuted }}>—</Text>
+  1636→                  )}
+  1637→                  {d.deducciones.map((c: any, i: number) => (
+  1638→                    <View key={i} style={{ flexDirection: "row", fontSize: 7 }}>
+  1639→                      <Text style={{ flex: 3 }}>{c.nombre}</Text>
+  1640→                      <Text style={{ flex: 2, textAlign: "right" }}>
+  1641→                        {fmtCOP(c.valor)}
+  1642→                      </Text>
+  1643→                    </View>
+  1644→                  ))}
+  1645→                  <View style={[styles.totalsRow, { marginTop: 2 }]}>
+  1646→                    <Text style={[styles.totalsLabel, { fontSize: 7 }]}>
+  1647→                      Total deducciones
+  1648→                    </Text>
+  1649→                    <Text style={[styles.totalsValue, { fontSize: 7 }]}>
+  1650→                      {fmtCOP(d.totalDeducciones)}
+  1651→                    </Text>
+  1652→                  </View>
+  1653→                </View>
+  1654→              </View>
+  1655→              <View style={[styles.totalsTable, { width: "40%", marginTop: 4 }]}>
+  1656→                <TotalRow label="Neto a pagar" value={fmtCOP(d.netoAPagar)} bold />
+  1657→              </View>
+  1658→              {d.cuneEmpleado && (
+  1659→                <View style={styles.cufeBox}>
+  1660→                  <Text style={styles.cufeLabel}>CUNE del empleado</Text>
+  1661→                  <Text style={styles.cufeValue}>{d.cuneEmpleado}</Text>
+  1662→                </View>
+  1663→              )}
+  1664→            </View>
+  1665→          );
+  1666→        })}
+  1667→
+  1668→        <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
+  1669→          <TotalRow label="Total devengos" value={fmtCOP(nomina.totalDevengos)} bold />
+  1670→          <TotalRow label="Total deducciones" value={fmtCOP(nomina.totalDeducciones)} bold />
+  1671→          <TotalRow label="Aportes patronales" value={fmtCOP(nomina.totalAportesPatronales)} bold />
+  1672→          <TotalRow label="Provisiones" value={fmtCOP(nomina.totalProvisiones)} bold />
+  1673→          <TotalRow label="Neto a pagar" value={fmtCOP(nomina.netoAPagar)} bold />
+  1674→        </View>
+  1675→
+  1676→        {nomina.cune && (
+  1677→          <View style={styles.cufeBox}>
+  1678→            <Text style={styles.cufeLabel}>CUNE Global</Text>
+  1679→            <Text style={styles.cufeValue}>{nomina.cune}</Text>
+  1680→          </View>
+  1681→        )}
+  1682→
+  1683→        <Footer />
+  1684→      </Page>
+  1685→    </Document>
+  1686→  );
+  1687→  return await renderToBuffer(doc);
+  1688→}
+  1689→
+  1690→// ============================================================
+  1691→// 9. REPORTE EJECUTIVO (dashboard en PDF)
+  1692→// ============================================================
+  1693→
+  1694→export async function generarPDFReporteEjecutivo(
+  1695→  empresaId: string,
+  1696→): Promise<Buffer> {
+  1697→  const empresa = await cargarEmpresa(empresaId);
+  1698→  if (!empresa) throw new Error("Empresa no encontrada");
+  1699→
+  1700→  const now = new Date();
+  1701→  const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1);
+  1702→  const inicioMesPasado = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  1703→
+  1704→  const facturasMes = await db.facturaVenta.findMany({
+  1705→    where: { empresaId, fecha: { gte: inicioMes }, estado: "vigente" },
+  1706→    select: { total: true, subtotalNeto: true, totalIva: true, nombreCliente: true },
+  1707→  });
+  1708→  const facturasMesPasado = await db.facturaVenta.findMany({
+  1709→    where: { empresaId, fecha: { gte: inicioMesPasado, lt: inicioMes }, estado: "vigente" },
+  1710→    select: { total: true },
+  1711→  });
+  1712→
+  1713→  const ventasMes = round(facturasMes.reduce((a, f) => a + f.total, 0), 2);
+  1714→  const ventasMesPasado = round(facturasMesPasado.reduce((a, f) => a + f.total, 0), 2);
+  1715→  const variacion = ventasMesPasado > 0 ? round(((ventasMes - ventasMesPasado) / ventasMesPasado) * 100, 2) : 0;
+  1716→  const numFacturas = facturasMes.length;
+  1717→  const ticketPromedio = numFacturas > 0 ? round(ventasMes / numFacturas, 2) : 0;
+  1718→
+  1719→  // Cartera
+  1720→  const cartera = await db.facturaVenta.findMany({
+  1721→    where: { empresaId, estado: "vigente", saldoPendiente: { gt: 0 } },
+  1722→    select: { saldoPendiente: true, fechaVencimiento: true },
+  1723→  });
+  1724→  const carteraTotal = round(cartera.reduce((a, c) => a + c.saldoPendiente, 0), 2);
+  1725→  let cartera30 = 0, cartera60 = 0, cartera90 = 0, carteraMas90 = 0, carteraVencida = 0;
+  1726→  for (const c of cartera) {
+  1727→    if (!c.fechaVencimiento) continue;
+  1728→    const dias = Math.floor((now.getTime() - c.fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24));
+  1729→    if (dias <= 0) continue;
+  1730→    if (dias <= 30) cartera30 += c.saldoPendiente;
+  1731→    else if (dias <= 60) cartera60 += c.saldoPendiente;
+  1732→    else if (dias <= 90) cartera90 += c.saldoPendiente;
+  1733→    else carteraMas90 += c.saldoPendiente;
+  1734→    carteraVencida += c.saldoPendiente;
+  1735→  }
+  1736→
+  1737→  // Top productos por valor vendido en el mes
+  1738→  const detallesMes = await db.detalleFacturaVenta.findMany({
+  1739→    where: {
+  1740→      factura: {
+  1741→        empresaId,
+  1742→        fecha: { gte: inicioMes },
+  1743→        estado: "vigente",
+  1744→      },
+  1745→    },
+  1746→    select: {
+  1747→      productoId: true,
+  1748→      descripcion: true,
+  1749→      cantidad: true,
+  1750→      total: true,
+  1751→    },
+  1752→  });
+  1753→  const porProducto: Record<string, { descripcion: string; cantidad: number; total: number }> = {};
+  1754→  for (const d of detallesMes) {
+  1755→    if (!d.productoId) continue;
+  1756→    if (!porProducto[d.productoId]) {
+  1757→      porProducto[d.productoId] = { descripcion: d.descripcion, cantidad: 0, total: 0 };
+  1758→    }
+  1759→    porProducto[d.productoId].cantidad += d.cantidad;
+  1760→    porProducto[d.productoId].total += d.total;
+  1761→  }
+  1762→  const topProductos = Object.entries(porProducto)
+  1763→    .map(([id, v]) => ({ id, ...v, total: round(v.total, 2) }))
+  1764→    .sort((a, b) => b.total - a.total)
+  1765→    .slice(0, 10);
+  1766→
+  1767→  // Compras
+  1768→  const comprasMes = await db.facturaCompra.aggregate({
+  1769→    where: { empresaId, fecha: { gte: inicioMes }, estado: "vigente" },
+  1770→    _sum: { total: true },
+  1771→  });
+  1772→
+  1773→  // Totales catálogo
+  1774→  const totalProductos = await db.producto.count({ where: { empresaId, activo: true } });
+  1775→  const totalClientes = await db.tercero.count({ where: { empresaId, tipo: "cliente", activo: true } });
+  1776→  const totalProveedores = await db.tercero.count({ where: { empresaId, tipo: "proveedor", activo: true } });
+  1777→
+  1778→  // Stock crítico
+  1779→  const stockCritico = await db.producto.findMany({
+  1780→    where: { empresaId, activo: true },
+  1781→    select: {
+  1782→      id: true,
+  1783→      codigo: true,
+  1784→      nombre: true,
+  1785→      stockMinimo: true,
+  1786→      saldosInventario: { select: { cantidad: true } },
+  1787→    },
+  1788→  });
+  1789→  const criticos = stockCritico
+  1790→    .map((p) => ({
+  1791→      codigo: p.codigo,
+  1792→      nombre: p.nombre,
+  1793→      stockTotal: p.saldosInventario.reduce((a, s) => a + s.cantidad, 0),
+  1794→      stockMinimo: p.stockMinimo,
+  1795→    }))
+  1796→    .filter((p) => p.stockTotal <= p.stockMinimo)
+  1797→    .slice(0, 10);
+  1798→
+  1799→  // KPIs contables del mes
+  1800→  const contaMovs = await db.movimientoContable.aggregate({
+  1801→    where: { empresaId, fecha: { gte: inicioMes }, comprobante: { estado: "contabilizado" } },
+  1802→    _sum: { debito: true, credito: true },
+  1803→  });
+  1804→
+  1805→  const doc = (
+  1806→    <Document title="Reporte Ejecutivo" author={empresa.razonSocial}>
+  1807→      <Page size="LETTER" style={styles.page}>
+  1808→        <Header
+  1809→          empresa={empresa}
+  1810→          titulo={"Reporte Ejecutivo"}
+  1811→          subtitulo={`Período ${fmtFecha(inicioMes)} → ${fmtFecha(now)}`}
+  1812→        />
+  1813→
+  1814→        {/* KPIs */}
+  1815→        <View style={styles.section}>
+  1816→          <Text style={styles.sectionTitle}>Indicadores clave del mes</Text>
+  1817→          <View style={styles.boxRow}>
+  1818→            <View style={styles.kpiBox}>
+  1819→              <Text style={styles.kpiLabel}>Ventas del mes</Text>
+  1820→              <Text style={styles.kpiValue}>{fmtCOP(ventasMes)}</Text>
+  1821→              <Text style={{ fontSize: 7, color: variacion >= 0 ? COLORS.primary : COLORS.danger }}>
+  1822→                {variacion >= 0 ? "▲" : "▼"} {Math.abs(variacion)}% vs mes anterior
+  1823→              </Text>
+  1824→            </View>
+  1825→            <View style={styles.kpiBox}>
+  1826→              <Text style={styles.kpiLabel}>Cartera total</Text>
+  1827→              <Text style={styles.kpiValue}>{fmtCOP(carteraTotal)}</Text>
+  1828→              <Text style={{ fontSize: 7, color: COLORS.textMuted }}>
+  1829→                Vencida: {fmtCOP(carteraVencida)}
+  1830→              </Text>
+  1831→            </View>
+  1832→            <View style={styles.kpiBox}>
+  1833→              <Text style={styles.kpiLabel}>Compras del mes</Text>
+  1834→              <Text style={styles.kpiValue}>{fmtCOP(comprasMes._sum.total ?? 0)}</Text>
+  1835→              <Text style={{ fontSize: 7, color: COLORS.textMuted }}>
+  1836→                {numFacturas} facturas emitidas
+  1837→              </Text>
+  1838→            </View>
+  1839→          </View>
+  1840→          <View style={styles.boxRow}>
+  1841→            <View style={styles.kpiBox}>
+  1842→              <Text style={styles.kpiLabel}>Ticket promedio</Text>
+  1843→              <Text style={styles.kpiValue}>{fmtCOP(ticketPromedio)}</Text>
+  1844→            </View>
+  1845→            <View style={styles.kpiBox}>
+  1846→              <Text style={styles.kpiLabel}>Productos críticos</Text>
+  1847→              <Text style={styles.kpiValue}>{criticos.length}</Text>
+  1848→            </View>
+  1849→            <View style={styles.kpiBox}>
+  1850→              <Text style={styles.kpiLabel}>Movimientos contables</Text>
+  1851→              <Text style={styles.kpiValue}>{fmtCOP(contaMovs._sum.debito ?? 0)}</Text>
+  1852→              <Text style={{ fontSize: 7, color: COLORS.textMuted }}>Débitos del mes</Text>
+  1853→            </View>
+  1854→          </View>
+  1855→        </View>
+  1856→
+  1857→        {/* Cartera por edades */}
+  1858→        <View style={styles.section}>
+  1859→          <Text style={styles.sectionTitle}>Cartera por edades</Text>
+  1860→          <View style={styles.boxRow}>
+  1861→            <View style={styles.kpiBox}>
+  1862→              <Text style={styles.kpiLabel}>0-30 días</Text>
+  1863→              <Text style={styles.kpiValue}>{fmtCOP(cartera30)}</Text>
+  1864→            </View>
+  1865→            <View style={styles.kpiBox}>
+  1866→              <Text style={styles.kpiLabel}>31-60 días</Text>
+  1867→              <Text style={styles.kpiValue}>{fmtCOP(cartera60)}</Text>
+  1868→            </View>
+  1869→            <View style={styles.kpiBox}>
+  1870→              <Text style={styles.kpiLabel}>61-90 días</Text>
+  1871→              <Text style={styles.kpiValue}>{fmtCOP(cartera90)}</Text>
+  1872→            </View>
+  1873→            <View style={styles.kpiBox}>
+  1874→              <Text style={styles.kpiLabel}>+90 días</Text>
+  1875→              <Text style={[styles.kpiValue, { color: COLORS.danger }]}>
+  1876→                {fmtCOP(carteraMas90)}
+  1877→              </Text>
+  1878→            </View>
+  1879→          </View>
+  1880→        </View>
+  1881→
+  1882→        {/* Top productos */}
+  1883→        <View style={styles.section}>
+  1884→          <Text style={styles.sectionTitle}>Top 10 productos vendidos en el mes</Text>
+  1885→          <TablePDF
+  1886→            columns={[
+  1887→              { label: "#", width: "6%", align: "center", render: (_r, i) => String(i + 1) },
+  1888→              { label: "Código", width: "10%", render: (r) => r.id?.slice(-6) ?? "—" },
+  1889→              { label: "Descripción", width: "54%", render: (r) => r.descripcion },
+  1890→              { label: "Cantidad", width: "12%", align: "right", render: (r) => fmtNumber(r.cantidad, 2) },
+  1891→              { label: "Total", width: "18%", align: "right", render: (r) => fmtCOP(r.total) },
+  1892→            ]}
+  1893→            rows={topProductos}
+  1894→          />
+  1895→        </View>
+  1896→
+  1897→        {/* Stock crítico */}
+  1898→        <View style={styles.section}>
+  1899→          <Text style={styles.sectionTitle}>Productos con stock crítico</Text>
+  1900→          <TablePDF
+  1901→            columns={[
+  1902→              { label: "Código", width: "15%", render: (r) => r.codigo },
+  1903→              { label: "Producto", width: "50%", render: (r) => r.nombre },
+  1904→              { label: "Stock actual", width: "15%", align: "right", render: (r) => fmtNumber(r.stockTotal, 2) },
+  1905→              { label: "Mínimo", width: "10%", align: "right", render: (r) => fmtNumber(r.stockMinimo, 2) },
+  1906→              { label: "Estado", width: "10%", align: "center", render: (r) => r.stockTotal <= 0 ? "AGOTADO" : "CRÍTICO" },
+  1907→            ]}
+  1908→            rows={criticos}
+  1909→          />
+  1910→        </View>
+  1911→
+  1912→        {/* Resumen */}
+  1913→        <View style={styles.boxRow}>
+  1914→          <View style={styles.boxCol}>
+  1915→            <Text style={styles.boxLabel}>Clientes activos</Text>
+  1916→            <Text style={styles.boxValue}>{totalClientes}</Text>
+  1917→          </View>
+  1918→          <View style={styles.boxCol}>
+  1919→            <Text style={styles.boxLabel}>Proveedores activos</Text>
+  1920→            <Text style={styles.boxValue}>{totalProveedores}</Text>
+  1921→          </View>
+  1922→          <View style={styles.boxCol}>
+  1923→            <Text style={styles.boxLabel}>Productos activos</Text>
+  1924→            <Text style={styles.boxValue}>{totalProductos}</Text>
+  1925→          </View>
+  1926→        </View>
+  1927→
+  1928→        <Text style={styles.notaText}>
+  1929→          Reporte consolidado del período actual. Los KPIs se calculan en línea al momento
+  1930→          de la generación. Este documento no constituye un estado financiero auditado.
+  1931→        </Text>
+  1932→
+  1933→        <Footer />
+  1934→      </Page>
+  1935→    </Document>
+  1936→  );
+  1937→  return await renderToBuffer(doc);
+  1938→}
+  1939→
+  1940→// ============================================================
+  1941→// 10. EXTRACTO BANCARIO (placeholder — sin datos aún)
+  1942→// ============================================================
+  1943→
+  1944→export async function generarPDFExtractoBancario(
+  1945→  cuentaId: string,
+  1946→  mes: number,
+  1947→  anio: number,
+  1948→  empresaId: string,
+  1949→): Promise<Buffer> {
+  1950→  const empresa = await cargarEmpresa(empresaId);
+  1951→  if (!empresa) throw new Error("Empresa no encontrada");
+  1952→
+  1953→  const doc = (
+  1954→    <Document title="Extracto Bancario" author={empresa.razonSocial}>
+  1955→      <Page size="LETTER" style={styles.page}>
+  1956→        <Header
+  1957→          empresa={empresa}
+  1958→          titulo={"Extracto Bancario"}
+  1959→          subtitulo={`Cuenta ${cuentaId} · Mes ${mes}/${anio}`}
+  1960→        />
+  1961→        <View style={[styles.stampBox, { borderColor: COLORS.warning }]}>
+  1962→          <Text style={[styles.stampText, { color: COLORS.warning }]}>
+  1963→            REPORT EN CONSTRUCCIÓN
+  1964→          </Text>
+  1965→          <Text style={styles.notaText}>
+  1966→            Este reporte está reservado para la integración bancaria futura
+  1967→            (Hermes §10.7). Cuando se carguen los archivos conciliatorios
+  1968→            (MT940, XML bancario), los movimientos aparecerán aquí.
+  1969→          </Text>
+  1970→        </View>
+  1971→        <View style={styles.section}>
+  1972→          <Text style={styles.sectionTitle}>Resumen del período</Text>
+  1973→          <View style={styles.boxRow}>
+  1974→            <View style={styles.boxCol}>
+  1975→              <Text style={styles.boxLabel}>Saldo inicial</Text>
+  1976→              <Text style={styles.boxValue}>—</Text>
+  1977→            </View>
+  1978→            <View style={styles.boxCol}>
+  1979→              <Text style={styles.boxLabel}>Ingresos</Text>
+  1980→              <Text style={styles.boxValue}>—</Text>
+  1981→            </View>
+  1982→            <View style={styles.boxCol}>
+  1983→              <Text style={styles.boxLabel}>Egresos</Text>
+  1984→              <Text style={styles.boxValue}>—</Text>
+  1985→            </View>
+  1986→            <View style={styles.boxCol}>
+  1987→              <Text style={styles.boxLabel}>Saldo final</Text>
+  1988→              <Text style={styles.boxValue}>—</Text>
+  1989→            </View>
+  1990→          </View>
+  1991→        </View>
+  1992→        <View style={styles.section}>
+  1993→          <Text style={styles.sectionTitle}>Movimientos</Text>
+  1994→          <Text style={{ fontSize: 9, color: COLORS.textMuted }}>
+  1995→            Sin movimientos para mostrar. Pendiente de integración bancaria.
+  1996→          </Text>
+  1997→        </View>
+  1998→        <Footer />
+  1999→      </Page>
+  2000→    </Document>
+
+[showing lines 1-2000 of 2004; use offset=2001 with limit to continue reading]

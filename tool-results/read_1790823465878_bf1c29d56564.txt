@@ -1,0 +1,1641 @@
+     1→// ============================================================
+     2→// MARSELLA ERP — Prisma Schema
+     3→// Núcleo contable-administrativo inspirado en SG Hermes 9.2.1.1,
+     4→// rediseñado sobre Next.js 16 + TypeScript + SQLite (intercambiable
+     5→// a PostgreSQL cambiando el provider). Multi-tenant por Empresa,
+     6→// audit-hardened, con FK formales (deuda técnica de Hermes resuelta).
+     7→// Mapeo Hermes → Marsella documentado en docs/MIGRATION_FROM_HERMES.md
+     8→// ============================================================
+     9→
+    10→generator client {
+    11→  provider = "prisma-client-js"
+    12→}
+    13→
+    14→datasource db {
+    15→  provider = "sqlite"
+    16→  url      = env("DATABASE_URL")
+    17→}
+    18→
+    19→// ---------- Multi-tenancy: Empresa ----------
+    20→
+    21→model Empresa {
+    22→  id                 String   @id @default(cuid())
+    23→  nit                String   @unique // 900.123.456-7
+    24→  razonSocial        String
+    25→  nombreComercial    String?
+    26→  direccion          String?
+    27→  telefono           String?
+    28→  ciudad             String?
+    29→  email              String?
+    30→  website            String?
+    31→  representanteLegal String?
+    32→  regimenTributario  String   @default("comun") // simple | comun | gran_contribuyente
+    33→  responsabilidad    String   @default("iva") // iva | no_responsable
+    34→  logo               String? // URL/base64
+    35→  moneda             String   @default("COP")
+    36→  decimales          Int      @default(2)
+    37→  redondeo           String   @default("half_up") // half_up | half_even | down
+    38→  zonaHoraria        String   @default("America/Bogota")
+    39→  // PUC maestro
+    40→  planCuentas        String   @default("Colombia_PUC")
+    41→  createdAt          DateTime @default(now())
+    42→  updatedAt          DateTime @updatedAt
+    43→
+    44→  resolucionDian        ResolucionDian[]
+    45→  terceros              Tercero[]
+    46→  productos             Producto[]
+    47→  servicios             Servicio[]
+    48→  bodegas               Bodega[]
+    49→  unidadesMedida        UnidadMedida[]
+    50→  lineas                LineaClasificacion[]
+    51→  listasPrecio          ListaPrecio[]
+    52→  impuestos             Impuesto[]
+    53→  centrosCosto          CentroCosto[]
+    54→  cuentasPuc            CuentaPuc[]
+    55→  comprobantes          Comprobante[] // asientos contables
+    56→  movimientosCont       MovimientoContable[]
+    57→  facturasVenta         FacturaVenta[]
+    58→  facturasCompra        FacturaCompra[]
+    59→  recibosCaja           ReciboCaja[]
+    60→  comprobantesEgreso    ComprobanteEgreso[]
+    61→  notas                 Nota[]
+    62→  usuarios              Usuario[]
+    63→  parametros            Parametro[]
+    64→  tiposDocumento        TipoDocumento[]
+    65→  ciudades              Ciudad[]
+    66→  actividadesEconomicas ActividadEconomica[]
+    67→}
+    68→
+    69→// ---------- Seguridad / RBAC (Hermes §5.1 mejorado) ----------
+    70→
+    71→model Usuario {
+    72→  id            String    @id @default(cuid())
+    73→  empresaId     String
+    74→  empresa       Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+    75→  email         String    @unique
+    76→  nombre        String
+    77→  passwordHash  String // bcryptjs
+    78→  rol           String    @default("vendedor") // admin | contador | cajero | vendedor | bodeguero
+    79→  activo        Boolean   @default(true)
+    80→  telefono      String?
+    81→  cargo         String?
+    82→  ultimoLogin   DateTime?
+    83→  resetToken    String?
+    84→  resetTokenExp DateTime?
+    85→  createdAt     DateTime  @default(now())
+    86→  updatedAt     DateTime  @updatedAt
+    87→
+    88→  @@index([empresaId])
+    89→}
+    90→
+    91→model Parametro {
+    92→  id          String   @id @default(cuid())
+    93→  empresaId   String
+    94→  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+    95→  clave       String
+    96→  valor       String // JSON scalar
+    97→  descripcion String?
+    98→  updatedAt   DateTime @updatedAt
+    99→
+   100→  @@unique([empresaId, clave])
+   101→  @@index([empresaId])
+   102→}
+   103→
+   104→// ---------- Catálogos maestros (Hermes §5.2) ----------
+   105→
+   106→model Ciudad {
+   107→  id           String    @id @default(cuid())
+   108→  empresaId    String
+   109→  empresa      Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   110→  codigoDane   String    @unique
+   111→  nombre       String
+   112→  departamento String
+   113→  createdAt    DateTime  @default(now())
+   114→  terceros     Tercero[]
+   115→
+   116→  @@index([empresaId])
+   117→}
+   118→
+   119→model ActividadEconomica {
+   120→  id          String    @id @default(cuid())
+   121→  empresaId   String
+   122→  empresa     Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   123→  codigoCIIU  String
+   124→  descripcion String
+   125→  tarifaICA   Float     @default(0) // por mil
+   126→  createdAt   DateTime  @default(now())
+   127→  terceros    Tercero[]
+   128→
+   129→  @@unique([empresaId, codigoCIIU])
+   130→}
+   131→
+   132→model TipoDocumento {
+   133→  id                   String         @id @default(cuid())
+   134→  empresaId            String
+   135→  empresa              Empresa        @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   136→  codigo               String // FAC | FPOS | COM | RC | CE | NDV | NCV | NDC | NCC
+   137→  nombre               String // Factura de Venta, Factura POS, Compra...
+   138→  naturaleza           String // debito | credito (para tercero y contable)
+   139→  afectaCartera        String         @default("none") // cxc | cxp | none
+   140→  afectaInventario     String         @default("none") // entrada | salida | none
+   141→  afectaContabilidad   Boolean        @default(true)
+   142→  consecutivoSiguiente Int            @default(1)
+   143→  createdAt            DateTime       @default(now())
+   144→  facturaVentas        FacturaVenta[]
+   145→
+   146→  @@unique([empresaId, codigo])
+   147→}
+   148→
+   149→// Resolución DIAN (Hermes §5.3) — soporta facturación electrónica
+   150→model ResolucionDian {
+   151→  id                   String   @id @default(cuid())
+   152→  empresaId            String
+   153→  empresa              Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   154→  numeroResolucion     String
+   155→  fechaResolucion      DateTime
+   156→  fechaInicioVigencia  DateTime
+   157→  fechaFinVigencia     DateTime
+   158→  prefijo              String // FEL, FPOS, FEST
+   159→  rangoinicio          Int
+   160→  rangoFin             Int
+   161→  rangoinicioActual    Int
+   162→  rangoFinActual       Int
+   163→  consecutivoSiguiente Int      @default(1) // # próximo
+   164→  tipoOperacion        String   @default("estandar") // estandar | pos | exportacion | no_dian
+   165→  ambiente             String   @default("produccion") // pruebas | produccion
+   166→  activa               Boolean  @default(true)
+   167→  createdAt            DateTime @default(now())
+   168→
+   169→  @@index([empresaId, activa])
+   170→}
+   171→
+   172→model Impuesto {
+   173→  id               String     @id @default(cuid())
+   174→  empresaId        String
+   175→  empresa          Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   176→  codigo           String // 01 | 04 | 06 | 07 (DIAN)
+   177→  nombre           String // IVA 19% | IVA 5% | Excento | Impoconsumo
+   178→  tipo             String // iva | impoconsumo | retefuente | reteica | reteiva
+   179→  tarifa           Float // 19, 5, 0, 2.5, etc
+   180→  cuentaContableId String?
+   181→  activo           Boolean    @default(true)
+   182→  createdAt        DateTime   @default(now())
+   183→  productos        Producto[]
+   184→
+   185→  @@unique([empresaId, codigo])
+   186→}
+   187→
+   188→model CentroCosto {
+   189→  id        String   @id @default(cuid())
+   190→  empresaId String
+   191→  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   192→  codigo    String
+   193→  nombre    String
+   194→  activo    Boolean  @default(true)
+   195→  createdAt DateTime @default(now())
+   196→
+   197→  @@unique([empresaId, codigo])
+   198→}
+   199→
+   200→model UnidadMedida {
+   201→  id        String     @id @default(cuid())
+   202→  empresaId String
+   203→  empresa   Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   204→  codigo    String     @unique // UND, KG, LT, MTR, CJA
+   205→  nombre    String
+   206→  factor    Float      @default(1) // para conversions
+   207→  createdAt DateTime   @default(now())
+   208→  productos Producto[]
+   209→
+   210→  @@index([empresaId])
+   211→}
+   212→
+   213→// Clasificación 6 niveles (Hermes §5.2 - linea1..linea6 colapsado a árbol)
+   214→model LineaClasificacion {
+   215→  id        String               @id @default(cuid())
+   216→  empresaId String
+   217→  empresa   Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   218→  parentId  String?
+   219→  parent    LineaClasificacion?  @relation("LineaTree", fields: [parentId], references: [id], onDelete: Cascade)
+   220→  children  LineaClasificacion[] @relation("LineaTree")
+   221→  nivel     Int // 1..6
+   222→  codigo    String
+   223→  nombre    String
+   224→  createdAt DateTime             @default(now())
+   225→  productos Producto[]
+   226→
+   227→  @@unique([empresaId, codigo, nivel])
+   228→  @@index([empresaId, parentId])
+   229→}
+   230→
+   231→model ListaPrecio {
+   232→  id              String           @id @default(cuid())
+   233→  empresaId       String
+   234→  empresa         Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   235→  nombre          String // Mayorista, Detal, VIP
+   236→  margen          Float            @default(0) // % sobre costo
+   237→  activa          Boolean          @default(true)
+   238→  createdAt       DateTime         @default(now())
+   239→  precioProductos PrecioProducto[]
+   240→
+   241→  @@index([empresaId])
+   242→}
+   243→
+   244→// ---------- Terceros (Hermes §5.2) ----------
+   245→
+   246→model Tercero {
+   247→  id                   String              @id @default(cuid())
+   248→  empresaId            String
+   249→  empresa              Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   250→  tipo                 String // cliente | proveedor | empleado | socio | todos
+   251→  tipoDocumento        String              @default("CC") // CC | NIT | CE | TI | PT
+   252→  numeroDocumento      String
+   253→  digitoVerif          String?
+   254→  nombre               String // razón social o nombre completo
+   255→  apellido1            String?
+   256→  apellido2            String?
+   257→  nombreComercial      String?
+   258→  direccion            String?
+   259→  telefono             String?
+   260→  email                String?
+   261→  ciudadId             String?
+   262→  ciudad               Ciudad?             @relation(fields: [ciudadId], references: [id])
+   263→  departamento         String?
+   264→  pais                 String              @default("CO")
+   265→  regimenTributario    String              @default("comun")
+   266→  responsabilidad      String              @default("iva")
+   267→  actividadEconomicaId String?
+   268→  actividadEconomica   ActividadEconomica? @relation(fields: [actividadEconomicaId], references: [id])
+   269→  // Crédito
+   270→  cupoCredito          Float               @default(0)
+   271→  saldoCartera         Float               @default(0) // actualizado por triggers de factura/recibo
+   272→  diasPlazo            Int                 @default(0)
+   273→  // Empleado
+   274→  cargo                String?
+   275→  salario              Float?
+   276→  fechaIngreso         DateTime?
+   277→  epsId                String?
+   278→  arl                  String?
+   279→  afpId                String?
+   280→  // Auditoría
+   281→  activo               Boolean             @default(true)
+   282→  observaciones        String?
+   283→  createdAt            DateTime            @default(now())
+   284→  updatedAt            DateTime            @updatedAt
+   285→
+   286→  // Relaciones
+   287→  facturasVenta      FacturaVenta[]
+   288→  facturasCompra     FacturaCompra[]
+   289→  recibosCaja        ReciboCaja[]
+   290→  comprobantesEgreso ComprobanteEgreso[]
+   291→  notas              Nota[]
+   292→  movimientosCont    MovimientoContable[]
+   293→  creditos           Credito[]
+   294→
+   295→  @@unique([empresaId, tipoDocumento, numeroDocumento])
+   296→  @@index([empresaId, tipo])
+   297→  @@index([empresaId, numeroDocumento])
+   298→}
+   299→
+   300→// ---------- Productos / Inventario (Hermes §5.2 + §5.6) ----------
+   301→
+   302→model Producto {
+   303→  id             String              @id @default(cuid())
+   304→  empresaId      String
+   305→  empresa        Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   306→  codigo         String // SKU interno
+   307→  codigoBarras   String?
+   308→  nombre         String
+   309→  descripcion    String?
+   310→  tipo           String              @default("producto") // producto | servicio | kit | insumo
+   311→  inventariable  Boolean             @default(true)
+   312→  unidadMedidaId String?
+   313→  unidadMedida   UnidadMedida?       @relation(fields: [unidadMedidaId], references: [id])
+   314→  lineaId        String?
+   315→  linea          LineaClasificacion? @relation(fields: [lineaId], references: [id])
+   316→  // Costos y precios
+   317→  costoPromedio  Float               @default(0)
+   318→  ultimoCosto    Float               @default(0)
+   319→  precio1        Float               @default(0) // precio base
+   320→  precio2        Float               @default(0)
+   321→  precio3        Float               @default(0)
+   322→  // Impuestos
+   323→  impuestoId     String?
+   324→  impuesto       Impuesto?           @relation(fields: [impuestoId], references: [id])
+   325→  tarifaIva      Float               @default(19) // snapshot
+   326→  // Inventario
+   327→  stockMinimo    Float               @default(0)
+   328→  stockMaximo    Float               @default(0)
+   329→  manejaLotes    Boolean             @default(false)
+   330→  manejaSeriales Boolean             @default(false)
+   331→  activo         Boolean             @default(true)
+   332→  createdAt      DateTime            @default(now())
+   333→  updatedAt      DateTime            @updatedAt
+   334→
+   335→  detallesVenta    DetalleFacturaVenta[]
+   336→  detallesCompra   DetalleFacturaCompra[]
+   337→  movimientosInv   MovimientoInventario[]
+   338→  saldosInventario SaldoInventario[]
+   339→  preciosPorLista  PrecioProducto[]
+   340→  loteInventarios  LoteInventario[]
+   341→
+   342→  @@unique([empresaId, codigo])
+   343→  @@index([empresaId, codigoBarras])
+   344→}
+   345→
+   346→model Servicio {
+   347→  id          String   @id @default(cuid())
+   348→  empresaId   String
+   349→  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   350→  codigo      String
+   351→  nombre      String
+   352→  descripcion String?
+   353→  precio      Float    @default(0)
+   354→  tarifaIva   Float    @default(19)
+   355→  duracion    Int? // minutos
+   356→  activo      Boolean  @default(true)
+   357→  createdAt   DateTime @default(now())
+   358→
+   359→  @@unique([empresaId, codigo])
+   360→}
+   361→
+   362→model PrecioProducto {
+   363→  id            String      @id @default(cuid())
+   364→  productoId    String
+   365→  producto      Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
+   366→  listaPrecioId String
+   367→  listaPrecio   ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
+   368→  precio        Float
+   369→  updatedAt     DateTime    @updatedAt
+   370→
+   371→  @@unique([productoId, listaPrecioId])
+   372→}
+   373→
+   374→// ---------- Bodegas e Inventario ----------
+   375→
+   376→model Bodega {
+   377→  id            String   @id @default(cuid())
+   378→  empresaId     String
+   379→  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   380→  codigo        String
+   381→  nombre        String
+   382→  direccion     String?
+   383→  responsableId String?
+   384→  activa        Boolean  @default(true)
+   385→  createdAt     DateTime @default(now())
+   386→
+   387→  saldosInventario SaldoInventario[]
+   388→  movimientosInv   MovimientoInventario[]
+   389→
+   390→  @@unique([empresaId, codigo])
+   391→}
+   392→
+   393→// Saldo consolidado por bodega + producto
+   394→model SaldoInventario {
+   395→  id            String   @id @default(cuid())
+   396→  empresaId     String
+   397→  productoId    String
+   398→  producto      Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+   399→  bodegaId      String
+   400→  bodega        Bodega   @relation(fields: [bodegaId], references: [id], onDelete: Cascade)
+   401→  cantidad      Float    @default(0)
+   402→  costoTotal    Float    @default(0)
+   403→  costoPromedio Float    @default(0) // = costoTotal / cantidad
+   404→  stockMinimo   Float    @default(0)
+   405→  updatedAt     DateTime @updatedAt
+   406→
+   407→  @@unique([productoId, bodegaId])
+   408→  @@index([bodegaId])
+   409→}
+   410→
+   411→// Lotes y seriales (Hermes §5.6)
+   412→model LoteInventario {
+   413→  id               String    @id @default(cuid())
+   414→  empresaId        String
+   415→  productoId       String
+   416→  producto         Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+   417→  bodegaId         String
+   418→  codigoLote       String
+   419→  fechaFabricacion DateTime?
+   420→  fechaVencimiento DateTime?
+   421→  cantidad         Float     @default(0)
+   422→  createdAt        DateTime  @default(now())
+   423→
+   424→  @@unique([empresaId, productoId, codigoLote])
+   425→}
+   426→
+   427→// Kardex (movimientos de inventario valorizados)
+   428→model MovimientoInventario {
+   429→  id            String   @id @default(cuid())
+   430→  empresaId     String
+   431→  productoId    String
+   432→  producto      Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+   433→  bodegaId      String
+   434→  bodega        Bodega   @relation(fields: [bodegaId], references: [id])
+   435→  tipo          String // entrada | salida | traslado | ajuste
+   436→  cantidad      Float // + entrada, - salida
+   437→  costoUnitario Float
+   438→  costoTotal    Float
+   439→  documentoTipo String? // FAC_VENTA, COMPRA, AJUSTE...
+   440→  documentoId   String?
+   441→  loteId        String?
+   442→  fecha         DateTime @default(now())
+   443→  createdAt     DateTime @default(now())
+   444→
+   445→  @@index([productoId, bodegaId, fecha])
+   446→  @@index([empresaId, fecha])
+   447→}
+   448→
+   449→// ---------- Facturación de Venta (Hermes §5.3 mejorado) ----------
+   450→
+   451→model FacturaVenta {
+   452→  id               String                @id @default(cuid())
+   453→  empresaId        String
+   454→  empresa          Empresa               @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   455→  tipoDocumentoId  String?
+   456→  tipoDocumento    TipoDocumento?        @relation(fields: [tipoDocumentoId], references: [id])
+   457→  numero           String // FEL-12345 (prefijo + consecutivo)
+   458→  consecutivoDIAN  Int?
+   459→  prefijo          String?
+   460→  // Datos del cliente (snapshot)
+   461→  terceroId        String?
+   462→  tercero          Tercero?              @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   463→  nombreCliente    String
+   464→  nitCliente       String
+   465→  // Fechas
+   466→  fecha            DateTime              @default(now())
+   467→  fechaVencimiento DateTime?
+   468→  // Items
+   469→  detalles         DetalleFacturaVenta[]
+   470→  // Totales
+   471→  subtotalBruto    Float                 @default(0) // antes de descuentos
+   472→  descuentoTotal   Float                 @default(0)
+   473→  subtotalNeto     Float                 @default(0) // subtotal - descuento
+   474→  totalIva         Float                 @default(0)
+   475→  totalImpoconsumo Float                 @default(0)
+   476→  totalReteFuente  Float                 @default(0)
+   477→  totalReteICA     Float                 @default(0)
+   478→  totalReteIva     Float                 @default(0)
+   479→  total            Float                 @default(0)
+   480→  // DIAN
+   481→  cufe             String? // Código Único de Factura Electrónica (mock inicial)
+   482→  qrCode           String? // URL de representación DIAN
+   483→  xmlUBL           String? // UBL 2.1 string
+   484→  estadoDIAN       String                @default("borrador") // borrador | procesado | aceptado | rechazado
+   485→  // POS / forma de pago
+   486→  esPOS            Boolean               @default(false)
+   487→  cajeroId         String?
+   488→  formaPago        String? // efectivo | tarjeta | transferencia | credito | mixto
+   489→  efectivoRecibido Float?
+   490→  cambio           Float?
+   491→  // Cartera
+   492→  saldoPendiente   Float                 @default(0) // si formaPago=credito
+   493→  estadoCartera    String                @default("pagada") // pagada | parcial | pendiente | vencida
+   494→  // Estado
+   495→  estado           String                @default("vigente") // vigente | anulada
+   496→  observaciones    String?
+   497→  createdAt        DateTime              @default(now())
+   498→  updatedAt        DateTime              @updatedAt
+   499→
+   500→  @@unique([empresaId, numero])
+   501→  @@index([empresaId, fecha])
+   502→  @@index([empresaId, terceroId])
+   503→}
+   504→
+   505→model DetalleFacturaVenta {
+   506→  id                  String       @id @default(cuid())
+   507→  facturaId           String
+   508→  factura             FacturaVenta @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+   509→  productoId          String?
+   510→  producto            Producto?    @relation(fields: [productoId], references: [id])
+   511→  descripcion         String
+   512→  cantidad            Float
+   513→  unidadMedida        String       @default("UND")
+   514→  precioUnitario      Float
+   515→  descuentoPorcentaje Float        @default(0)
+   516→  descuentoValor      Float        @default(0)
+   517→  subtotal            Float
+   518→  tarifaIva           Float        @default(19)
+   519→  iva                 Float        @default(0)
+   520→  impoconsumo         Float        @default(0)
+   521→  total               Float
+   522→  costoUnitario       Float        @default(0) // para utilidad
+   523→  bodegaId            String?
+   524→  loteId              String?
+   525→
+   526→  @@index([facturaId])
+   527→}
+   528→
+   529→// ---------- Compras y Proveedores (Hermes §5.4) ----------
+   530→
+   531→model FacturaCompra {
+   532→  id                     String                 @id @default(cuid())
+   533→  empresaId              String
+   534→  empresa                Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   535→  numero                 String // interno
+   536→  proveedorFacturaNumero String? // número del proveedor
+   537→  terceroId              String?
+   538→  tercero                Tercero?               @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   539→  nombreProveedor        String
+   540→  nitProveedor           String
+   541→  fecha                  DateTime               @default(now())
+   542→  fechaVencimiento       DateTime?
+   543→  detalles               DetalleFacturaCompra[]
+   544→  subtotal               Float                  @default(0)
+   545→  descuentoTotal         Float                  @default(0)
+   546→  totalIva               Float                  @default(0) // IVA descontable
+   547→  totalImpoconsumo       Float                  @default(0)
+   548→  totalRetenciones       Float                  @default(0)
+   549→  total                  Float                  @default(0)
+   550→  saldoPendiente         Float                  @default(0)
+   551→  estadoCartera          String                 @default("pendiente")
+   552→  bodegaDestinoId        String?
+   553→  estado                 String                 @default("vigente") // vigente | anulada
+   554→  observaciones          String?
+   555→  createdAt              DateTime               @default(now())
+   556→  updatedAt              DateTime               @updatedAt
+   557→
+   558→  @@unique([empresaId, numero])
+   559→  @@index([empresaId, fecha])
+   560→}
+   561→
+   562→model DetalleFacturaCompra {
+   563→  id              String        @id @default(cuid())
+   564→  facturaId       String
+   565→  factura         FacturaCompra @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+   566→  productoId      String?
+   567→  producto        Producto?     @relation(fields: [productoId], references: [id])
+   568→  descripcion     String
+   569→  cantidad        Float
+   570→  unidadMedida    String        @default("UND")
+   571→  precioUnitario  Float
+   572→  descuentoValor  Float         @default(0)
+   573→  subtotal        Float
+   574→  tarifaIva       Float         @default(19)
+   575→  iva             Float         @default(0)
+   576→  total           Float
+   577→  bodegaDestinoId String?
+   578→
+   579→  @@index([facturaId])
+   580→}
+   581→
+   582→// ---------- Cartera CXC / CXP (Hermes §5.9) ----------
+   583→
+   584→model ReciboCaja {
+   585→  // Recibo de Caja / Comprobante de Ingreso (recaudo de cartera)
+   586→  id                 String   @id @default(cuid())
+   587→  empresaId          String
+   588→  empresa            Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   589→  numero             String
+   590→  terceroId          String?
+   591→  tercero            Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   592→  nombreTercero      String
+   593→  fecha              DateTime @default(now())
+   594→  valorTotal         Float
+   595→  concepto           String?
+   596→  formaPago          String // efectivo | tarjeta | transferencia | cheque
+   597→  bancoId            String?
+   598→  observaciones      String?
+   599→  aplicacionFacturas String? // JSON [{facturaId, valor}]
+   600→  estado             String   @default("vigente")
+   601→  createdAt          DateTime @default(now())
+   602→
+   603→  @@unique([empresaId, numero])
+   604→  @@index([empresaId, fecha])
+   605→}
+   606→
+   607→model ComprobanteEgreso {
+   608→  // Pago a proveedores y gastos
+   609→  id                String   @id @default(cuid())
+   610→  empresaId         String
+   611→  empresa           Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   612→  numero            String
+   613→  terceroId         String?
+   614→  tercero           Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   615→  nombreTercero     String
+   616→  fecha             DateTime @default(now())
+   617→  valorTotal        Float
+   618→  concepto          String?
+   619→  formaPago         String // efectivo | transferencia | cheque
+   620→  bancoId           String?
+   621→  observaciones     String?
+   622→  aplicacionCompras String? // JSON [{facturaId, valor}]
+   623→  estado            String   @default("vigente")
+   624→  createdAt         DateTime @default(now())
+   625→
+   626→  @@unique([empresaId, numero])
+   627→  @@index([empresaId, fecha])
+   628→}
+   629→
+   630→model Nota {
+   631→  // Notas débito y crédito (Hermes §5.9)
+   632→  id                String   @id @default(cuid())
+   633→  empresaId         String
+   634→  empresa           Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   635→  numero            String
+   636→  tipo              String // debito | credito
+   637→  afecta            String // venta | compra
+   638→  facturaOrigenId   String?
+   639→  facturaOrigenTipo String? // Venta | Compra
+   640→  terceroId         String?
+   641→  tercero           Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   642→  fecha             DateTime @default(now())
+   643→  valorTotal        Float
+   644→  concepto          String?
+   645→  estado            String   @default("vigente")
+   646→  createdAt         DateTime @default(now())
+   647→
+   648→  @@unique([empresaId, numero])
+   649→  @@index([empresaId, fecha])
+   650→}
+   651→
+   652→// ---------- Contabilidad (Hermes §5.12) ----------
+   653→
+   654→model CuentaPuc {
+   655→  id                  String               @id @default(cuid())
+   656→  empresaId           String
+   657→  empresa             Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   658→  codigo              String               @unique // 1105, 2205, 4175...
+   659→  nombre              String
+   660→  nivel               Int // 1 (clase) - 6 (auxiliar)
+   661→  naturaleza          String // debito | credito
+   662→  esAjustable         Boolean              @default(false) // para ajustes NIIF
+   663→  esMovimiento        Boolean              @default(true) // admite asientos
+   664→  saldoActual         Float                @default(0) // actualizado por comprobantes
+   665→  cuentaPadreId       String?
+   666→  cuentaPadre         CuentaPuc?           @relation("CuentaPucTree", fields: [cuentaPadreId], references: [id])
+   667→  subcuentas          CuentaPuc[]          @relation("CuentaPucTree")
+   668→  createdAt           DateTime             @default(now())
+   669→  movimientoContables MovimientoContable[]
+   670→
+   671→  @@index([empresaId, codigo])
+   672→  @@index([cuentaPadreId])
+   673→}
+   674→
+   675→model Comprobante {
+   676→  // Asiento contable (cabecera + movimientos)
+   677→  id                  String   @id @default(cuid())
+   678→  empresaId           String
+   679→  empresa             Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   680→  numero              String // CG-2026-0001
+   681→  tipo                String // manual | facturacion | compra | nomina | cierre | ajuste | tesoreria
+   682→  fecha               DateTime @default(now())
+   683→  descripcion         String?
+   684→  totalDebito         Float    @default(0)
+   685→  totalCredito        Float    @default(0)
+   686→  diferencia          Float    @default(0) // debe ser 0 si está cuadrado
+   687→  estado              String   @default("borrador") // borrador | contabilizado | anulado
+   688→  documentoOrigenId   String?
+   689→  documentoOrigenTipo String?
+   690→  centroCostoId       String?
+   691→  createdAt           DateTime @default(now())
+   692→  updatedAt           DateTime @updatedAt
+   693→
+   694→  movimientos MovimientoContable[]
+   695→
+   696→  @@unique([empresaId, numero])
+   697→  @@index([empresaId, fecha])
+   698→}
+   699→
+   700→model MovimientoContable {
+   701→  id            String      @id @default(cuid())
+   702→  empresaId     String
+   703→  empresa       Empresa     @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+   704→  comprobanteId String
+   705→  comprobante   Comprobante @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+   706→  cuentaId      String
+   707→  cuenta        CuentaPuc   @relation(fields: [cuentaId], references: [id])
+   708→  terceroId     String?
+   709→  tercero       Tercero?    @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+   710→  centroCostoId String?
+   711→  descripcion   String?
+   712→  debito        Float       @default(0)
+   713→  credito       Float       @default(0)
+   714→  fecha         DateTime    @default(now())
+   715→  createdAt     DateTime    @default(now())
+   716→
+   717→  @@index([comprobanteId])
+   718→  @@index([empresaId, cuentaId, fecha])
+   719→  @@index([empresaId, terceroId, fecha])
+   720→}
+   721→
+   722→// ============================================================
+   723→// MCP — Model Context Protocol (Anthropic open standard)
+   724→// Expone resources/tools/prompts del ERP a LLMs externos
+   725→// y consume servidores MCP externos (CRM-ALBRA, bancos, etc.)
+   726→// ============================================================
+   727→
+   728→// Conexiones MCP externas (servidores MCP que el ERP consume)
+   729→model MCPConexion {
+   730→  id             String    @id @default(cuid())
+   731→  empresaId      String
+   732→  nombre         String // CRM-ALBRA, Banco BBVA, Shopify, etc.
+   733→  descripcion    String?
+   734→  tipoTransporte String    @default("sse") // sse | websocket | stdio (solo info)
+   735→  endpoint       String // URL del servidor MCP externo (http://... o wss://...)
+   736→  // Auth: token bearer o header custom (cifrado AES-256-GCM)
+   737→  authTokenEnc   String?
+   738→  authHeader     String    @default("Authorization")
+   739→  authPrefix     String    @default("Bearer")
+   740→  // Catálogos caché
+   741→  resources      String? // JSON array: [{ uri, name, description, mimeType }]
+   742→  tools          String? // JSON array: [{ name, description, inputSchema }]
+   743→  prompts        String? // JSON array: [{ name, description, arguments }]
+   744→  // Estado
+   745→  activo         Boolean   @default(true)
+   746→  ultimoSync     DateTime?
+   747→  ultimoError    String?
+   748→  createdAt      DateTime  @default(now())
+   749→  updatedAt      DateTime  @updatedAt
+   750→
+   751→  logs MCPLog[]
+   752→
+   753→  @@index([empresaId, activo])
+   754→}
+   755→
+   756→// Log de todas las invocaciones MCP (auditoría)
+   757→model MCPLog {
+   758→  id         String       @id @default(cuid())
+   759→  empresaId  String
+   760→  conexionId String?
+   761→  conexion   MCPConexion? @relation(fields: [conexionId], references: [id], onDelete: SetNull)
+   762→  direccion  String // inbound (alguien llamó a nuestro server) | outbound (nosotros llamamos a externo)
+   763→  tipo       String // resource | tool | prompt
+   764→  nombre     String // uri de resource o name de tool/prompt
+   765→  argumentos String? // JSON input
+   766→  resultado  String? // JSON output (truncado si > 10KB)
+   767→  duracionMs Int?
+   768→  userId     String? // usuario que ejecutó (si fue autenticado)
+   769→  error      String?
+   770→  createdAt  DateTime     @default(now())
+   771→
+   772→  @@index([empresaId, createdAt])
+   773→  @@index([conexionId, createdAt])
+   774→}
+   775→
+   776→// ============================================================
+   777→// Módulo de Nómina y Nómina Electrónica DIAN (CUNE)
+   778→// Agregado por Task ERP-NOMINA
+   779→// Modelos: NominaConcepto, Nomina, DetalleNomina, RetencionFuenteTabla
+   780→// ============================================================
+   781→
+   782→// Conceptos de nómina (devengos, deducciones, aportes, provisiones)
+   783→model NominaConcepto {
+   784→  id                    String   @id @default(cuid())
+   785→  empresaId             String
+   786→  codigo                String // SALARIO_BASICO, AUX_TRANSPORTE, EPS_TRABAJADOR, etc.
+   787→  nombre                String
+   788→  tipo                  String // devengo | deduccion | aporte_patronal | provision
+   789→  formula               String? // expresión: porcentaje, base (IBC), o fijo
+   790→  cuentaContableDebito  String? // codigo PUC
+   791→  cuentaContableCredito String?
+   792→  basePorDefecto        String   @default("salario") // salario | ibc | total_devengado
+   793→  porcentaje            Float    @default(0)
+   794→  activo                Boolean  @default(true)
+   795→  createdAt             DateTime @default(now())
+   796→
+   797→  @@unique([empresaId, codigo])
+   798→  @@index([empresaId, tipo])
+   799→}
+   800→
+   801→// Cabecera de liquidación de nómina
+   802→model Nomina {
+   803→  id                     String   @id @default(cuid())
+   804→  empresaId              String
+   805→  numero                 String // NOM-2026-0001
+   806→  tipo                   String   @default("quincenal") // quincenal | mensual | vacaciones | liquidacion_final
+   807→  periodoInicio          DateTime
+   808→  periodoFin             DateTime
+   809→  fechaPago              DateTime
+   810→  centroCostoId          String?
+   811→  estado                 String   @default("borrador") // borrador | causada | pagada | anulada
+   812→  // Totales
+   813→  totalDevengos          Float    @default(0)
+   814→  totalDeducciones       Float    @default(0)
+   815→  totalAportesPatronales Float    @default(0)
+   816→  totalProvisiones       Float    @default(0)
+   817→  netoAPagar             Float    @default(0)
+   818→  // Electrónica DIAN (CUNE)
+   819→  cune                   String? // Código Único de Nómina Electrónica (global)
+   820→  xmlUBL                 String? // XML global (no se usa por ahora, se genera por empleado)
+   821→  estadoDIAN             String   @default("borrador") // borrador | procesado | aceptado | rechazado
+   822→  comprobanteContableId  String?
+   823→  createdAt              DateTime @default(now())
+   824→  updatedAt              DateTime @updatedAt
+   825→
+   826→  detalles DetalleNomina[]
+   827→
+   828→  @@unique([empresaId, numero])
+   829→  @@index([empresaId, fechaPago])
+   830→}
+   831→
+   832→// Detalle por empleado de la liquidación
+   833→model DetalleNomina {
+   834→  id                String   @id @default(cuid())
+   835→  nominaId          String
+   836→  nomina            Nomina   @relation(fields: [nominaId], references: [id], onDelete: Cascade)
+   837→  empresaId         String
+   838→  terceroId         String // empleado (Tercero tipo=empleado) — raw FK sin relation para no tocar schema Tercero
+   839→  // Bases
+   840→  salarioBasico     Float
+   841→  diasLaborados     Float    @default(30)
+   842→  ibc               Float    @default(0)
+   843→  // Devengos y deducciones como JSON
+   844→  devengos          String? // JSON array: [{ codigo, nombre, valor }]
+   845→  deducciones       String? // JSON array: [{ codigo, nombre, valor }]
+   846→  aportesPatronales String? // JSON
+   847→  provisiones       String? // JSON
+   848→  // Totales del empleado
+   849→  totalDevengado    Float    @default(0)
+   850→  totalDeducciones  Float    @default(0)
+   851→  netoAPagar        Float    @default(0)
+   852→  // Nómina electrónica específica
+   853→  cuneEmpleado      String? // CUNE individual (por empleado)
+   854→  xmlEmpleado       String?
+   855→  createdAt         DateTime @default(now())
+   856→
+   857→  @@index([nominaId])
+   858→  @@index([empresaId, terceroId])
+   859→}
+   860→
+   861→// Tabla de retención en la fuente por salarios (DIAN 2026)
+   862→model RetencionFuenteTabla {
+   863→  id         String   @id @default(cuid())
+   864→  empresaId  String
+   865→  vigencia   Int      @default(2026)
+   866→  desde      Float
+   867→  hasta      Float
+   868→  porcentaje Float
+   869→  baseUVT    Float
+   870→  activa     Boolean  @default(true)
+   871→  createdAt  DateTime @default(now())
+   872→
+   873→  @@index([empresaId, vigencia])
+   874→}
+   875→
+   876→// ---------- DIAN — Facturación Electrónica real ----------
+   877→// Configuración DIAN por empresa (certificado X.509 P12 cifrado con
+   878→// AES-256-GCM, datos del proveedor tecnológico autorizado, softwareId
+   879→// y softwarePin registrados en DIAN, ambiente pruebas/producción).
+   880→model ConfiguracionDIAN {
+   881→  id                           String    @id @default(cuid())
+   882→  empresaId                    String
+   883→  ambiente                     String    @default("pruebas") // pruebas | produccion
+   884→  certificadoP12Enc            String? // AES-256-GCM cifrado, base64 del .p12 cargado
+   885→  certificadoPasswordEnc       String? // AES-256-GCM cifrado
+   886→  certificadoSubject           String?
+   887→  certificadoValidFrom         DateTime?
+   888→  certificadoValidTo           DateTime?
+   889→  proveedorTecnologicoNit      String? // NIT del PAC (proveedor tecnológico autorizado)
+   890→  proveedorTecnologicoTokenEnc String? // token asignado por DIAN al PAC
+   891→  softwareId                   String? // identificador del software registrado en DIAN
+   892→  softwarePin                  String? // PIN del software
+   893→  webhookUrl                   String? // URL donde DIAN notifica cambios de estado
+   894→  activo                       Boolean   @default(false)
+   895→  createdAt                    DateTime  @default(now())
+   896→  updatedAt                    DateTime  @updatedAt
+   897→
+   898→  @@unique([empresaId, ambiente])
+   899→  @@index([empresaId])
+   900→}
+   901→
+   902→// Cola de envíos DIAN con reintentos automáticos (backoff exponencial).
+   903→model DIANEnvio {
+   904→  id             String    @id @default(cuid())
+   905→  empresaId      String
+   906→  facturaId      String?
+   907→  nominaId       String?
+   908→  tipoDocumento  String // factura_venta | nota_credito | nomina
+   909→  cufe           String
+   910→  trackId        String?
+   911→  estado         String    @default("pendiente") // pendiente | enviando | aceptado | rechazado | error
+   912→  intentos       Int       @default(0)
+   913→  maxIntentos    Int       @default(5)
+   914→  proximoIntento DateTime?
+   915→  respuestaDian  String? // JSON con la respuesta de DIAN
+   916→  mensajeError   String?
+   917→  xmlFirmado     String? // XML con firma XAdES-EPES
+   918→  createdAt      DateTime  @default(now())
+   919→  updatedAt      DateTime  @updatedAt
+   920→
+   921→  @@index([empresaId, estado])
+   922→  @@index([proximoIntento])
+   923→}
+   924→
+   925→// ============================================================
+   926→// FASE 3 — Conciliación bancaria, Cajas POS, Créditos,
+   927→// Presupuesto, Verticales Restaurante/Hotel
+   928→// ============================================================
+   929→
+   930→// ---------- Bancos y Conciliación (Hermes §5.8) ----------
+   931→
+   932→model Banco {
+   933→  id              String           @id @default(cuid())
+   934→  empresaId       String
+   935→  codigo          String // 001=BanColombia, 002=BBVA, etc.
+   936→  nombre          String
+   937→  nit             String?
+   938→  contacto        String?
+   939→  telefono        String?
+   940→  email           String?
+   941→  activo          Boolean          @default(true)
+   942→  createdAt       DateTime         @default(now())
+   943→  cuentaBancarias CuentaBancaria[]
+   944→
+   945→  @@unique([empresaId, codigo])
+   946→  @@index([empresaId])
+   947→}
+   948→
+   949→model CuentaBancaria {
+   950→  id                    String                 @id @default(cuid())
+   951→  empresaId             String
+   952→  bancoId               String
+   953→  banco                 Banco                  @relation(fields: [bancoId], references: [id], onDelete: Cascade)
+   954→  numeroCuenta          String
+   955→  tipo                  String                 @default("corriente") // ahorro | corriente
+   956→  titular               String
+   957→  saldoActual           Float                  @default(0)
+   958→  moneda                String                 @default("COP")
+   959→  activa                Boolean                @default(true)
+   960→  createdAt             DateTime               @default(now())
+   961→  movimientoBancarios   MovimientoBancario[]
+   962→  extractoBancarios     ExtractoBancario[]
+   963→  conciliacionBancarias ConciliacionBancaria[]
+   964→
+   965→  @@unique([empresaId, numeroCuenta])
+   966→  @@index([empresaId])
+   967→}
+   968→
+   969→model MovimientoBancario {
+   970→  id               String         @id @default(cuid())
+   971→  empresaId        String
+   972→  cuentaBancariaId String
+   973→  cuentaBancaria   CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id], onDelete: Cascade)
+   974→  fecha            DateTime       @default(now())
+   975→  tipo             String // deposito | retiro | transferencia | cheque | nota | interes | comision
+   976→  monto            Float // positivo: entrada, negativo: salida
+   977→  descripcion      String?
+   978→  terceroId        String?
+   979→  comprobanteId    String? // comprobante contable asociado
+   980→  conciliado       Boolean        @default(false)
+   981→  extractoId       String?
+   982→  createdAt        DateTime       @default(now())
+   983→
+   984→  @@index([empresaId, fecha])
+   985→  @@index([cuentaBancariaId, conciliado])
+   986→}
+   987→
+   988→model ExtractoBancario {
+   989→  id                    String                 @id @default(cuid())
+   990→  empresaId             String
+   991→  cuentaBancariaId      String
+   992→  cuentaBancaria        CuentaBancaria         @relation(fields: [cuentaBancariaId], references: [id], onDelete: Cascade)
+   993→  mes                   Int // 1-12
+   994→  anio                  Int
+   995→  saldoInicial          Float                  @default(0)
+   996→  saldoFinal            Float                  @default(0)
+   997→  archivo               String? // ruta o nombre del archivo MT940/CSV importado
+   998→  estado                String                 @default("pendiente") // pendiente | conciliado | parcial
+   999→  fechaConciliacion     DateTime?
+  1000→  createdAt             DateTime               @default(now())
+  1001→  extractoMovimientos   ExtractoMovimiento[]
+  1002→  conciliacionBancarias ConciliacionBancaria[]
+  1003→
+  1004→  @@unique([empresaId, cuentaBancariaId, mes, anio])
+  1005→  @@index([empresaId])
+  1006→}
+  1007→
+  1008→model ExtractoMovimiento {
+  1009→  id                   String           @id @default(cuid())
+  1010→  empresaId            String
+  1011→  extractoId           String
+  1012→  extracto             ExtractoBancario @relation(fields: [extractoId], references: [id], onDelete: Cascade)
+  1013→  fecha                DateTime
+  1014→  descripcion          String
+  1015→  monto                Float
+  1016→  conciliado           Boolean          @default(false)
+  1017→  movimientoBancarioId String? // si matchea con un movimiento interno
+  1018→  createdAt            DateTime         @default(now())
+  1019→
+  1020→  @@index([extractoId, conciliado])
+  1021→}
+  1022→
+  1023→model ConciliacionBancaria {
+  1024→  id                   String            @id @default(cuid())
+  1025→  empresaId            String
+  1026→  cuentaBancariaId     String
+  1027→  cuentaBancaria       CuentaBancaria    @relation(fields: [cuentaBancariaId], references: [id])
+  1028→  extractoId           String?
+  1029→  extracto             ExtractoBancario? @relation(fields: [extractoId], references: [id])
+  1030→  fecha                DateTime          @default(now())
+  1031→  saldoInicialLibro    Float             @default(0)
+  1032→  saldoInicialExtracto Float             @default(0)
+  1033→  ajustesLibro         Float             @default(0)
+  1034→  ajustesExtracto      Float             @default(0)
+  1035→  saldoFinalLibro      Float             @default(0)
+  1036→  saldoFinalExtracto   Float             @default(0)
+  1037→  diferencia           Float             @default(0)
+  1038→  estado               String            @default("borrador") // borrador | conciliada | anulada
+  1039→  userId               String?
+  1040→  observaciones        String?
+  1041→  createdAt            DateTime          @default(now())
+  1042→
+  1043→  @@index([empresaId, fecha])
+  1044→}
+  1045→
+  1046→// ---------- Cajas POS y Arqueos (Hermes §5.8) ----------
+  1047→
+  1048→model CajaPOS {
+  1049→  id            String       @id @default(cuid())
+  1050→  empresaId     String
+  1051→  codigo        String
+  1052→  nombre        String
+  1053→  ubicacion     String? // Mostrador, Salon 1, etc.
+  1054→  responsableId String?
+  1055→  saldoInicial  Float        @default(0)
+  1056→  saldoActual   Float        @default(0)
+  1057→  estado        String       @default("abierta") // abierta | cerrada
+  1058→  activa        Boolean      @default(true)
+  1059→  createdAt     DateTime     @default(now())
+  1060→  arqueoCajas   ArqueoCaja[]
+  1061→
+  1062→  @@unique([empresaId, codigo])
+  1063→  @@index([empresaId])
+  1064→}
+  1065→
+  1066→model ArqueoCaja {
+  1067→  id                  String   @id @default(cuid())
+  1068→  empresaId           String
+  1069→  cajaId              String
+  1070→  caja                CajaPOS  @relation(fields: [cajaId], references: [id], onDelete: Cascade)
+  1071→  fecha               DateTime @default(now())
+  1072→  turno               String   @default("completo") // mañana | tarde | noche | completo
+  1073→  saldoInicial        Float    @default(0)
+  1074→  ventasEfectivo      Float    @default(0)
+  1075→  ventasTarjeta       Float    @default(0)
+  1076→  ventasTransferencia Float    @default(0)
+  1077→  otrosIngresos       Float    @default(0)
+  1078→  gastosMenores       Float    @default(0)
+  1079→  saldoFinalSistema   Float    @default(0)
+  1080→  saldoFinalConteo    Float    @default(0)
+  1081→  diferencia          Float    @default(0)
+  1082→  observaciones       String?
+  1083→  userId              String?
+  1084→  createdAt           DateTime @default(now())
+  1085→
+  1086→  @@index([empresaId, fecha])
+  1087→  @@index([cajaId, fecha])
+  1088→}
+  1089→
+  1090→// ---------- Créditos y Financiación (Hermes §5.10) ----------
+  1091→
+  1092→model SolicitudCredito {
+  1093→  id              String    @id @default(cuid())
+  1094→  empresaId       String
+  1095→  terceroId       String?
+  1096→  montoSolicitado Float
+  1097→  tasaInteres     Float // % efectivo anual
+  1098→  plazoMeses      Int
+  1099→  cuotaN          Int // número de cuotas
+  1100→  destino         String?
+  1101→  referencias     String? // JSON
+  1102→  estado          String    @default("pendiente") // pendiente | aprobada | rechazada | anulada
+  1103→  aprobadoPorId   String?
+  1104→  fechaAprobacion DateTime?
+  1105→  observaciones   String?
+  1106→  createdAt       DateTime  @default(now())
+  1107→  creditos        Credito[]
+  1108→
+  1109→  @@index([empresaId, estado])
+  1110→}
+  1111→
+  1112→model Credito {
+  1113→  id             String            @id @default(cuid())
+  1114→  empresaId      String
+  1115→  terceroId      String?
+  1116→  tercero        Tercero?          @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  1117→  solicitudId    String?
+  1118→  solicitud      SolicitudCredito? @relation(fields: [solicitudId], references: [id])
+  1119→  montoPrincipal Float
+  1120→  tasaInteres    Float // % EA
+  1121→  plazoMeses     Int
+  1122→  cuotaN         Int
+  1123→  fechaInicio    DateTime
+  1124→  fechaFin       DateTime?
+  1125→  saldoCapital   Float             @default(0)
+  1126→  estado         String            @default("vigente") // vigente | pagado | en_mora | anulado
+  1127→  cuotas         CuotaCredito[]
+  1128→  createdAt      DateTime          @default(now())
+  1129→
+  1130→  @@index([empresaId, estado])
+  1131→}
+  1132→
+  1133→model CuotaCredito {
+  1134→  id                  String    @id @default(cuid())
+  1135→  creditoId           String
+  1136→  credito             Credito   @relation(fields: [creditoId], references: [id], onDelete: Cascade)
+  1137→  empresaId           String
+  1138→  numero              Int // 1, 2, 3...
+  1139→  fechaVencimiento    DateTime
+  1140→  capital             Float
+  1141→  interes             Float
+  1142→  totalCuota          Float
+  1143→  saldoCapital        Float // saldo capital restante después de esta cuota
+  1144→  estado              String    @default("pendiente") // pendiente | pagada | en_mora
+  1145→  fechaPago           DateTime?
+  1146→  comprobanteEgresoId String?
+  1147→  createdAt           DateTime  @default(now())
+  1148→
+  1149→  @@index([creditoId, numero])
+  1150→  @@index([empresaId, estado])
+  1151→}
+  1152→
+  1153→// ---------- Presupuesto (Hermes §5.13) ----------
+  1154→
+  1155→model RubroPresupuestal {
+  1156→  id                 String              @id @default(cuid())
+  1157→  empresaId          String
+  1158→  codigo             String
+  1159→  nombre             String
+  1160→  tipo               String // ingreso | gasto
+  1161→  nivel              Int                 @default(1)
+  1162→  cuentaPadreId      String?
+  1163→  cuentaPadre        RubroPresupuestal?  @relation("RubroTree", fields: [cuentaPadreId], references: [id])
+  1164→  children           RubroPresupuestal[] @relation("RubroTree")
+  1165→  vigencia           Int                 @default(2026)
+  1166→  apropiacionInicial Float               @default(0)
+  1167→  createdAt          DateTime            @default(now())
+  1168→  cdps               CDP[]
+  1169→
+  1170→  @@unique([empresaId, codigo, vigencia])
+  1171→  @@index([empresaId, vigencia])
+  1172→}
+  1173→
+  1174→model CDP {
+  1175→  id            String            @id @default(cuid())
+  1176→  empresaId     String
+  1177→  numero        String // CDP-2026-0001
+  1178→  fecha         DateTime          @default(now())
+  1179→  rubroId       String
+  1180→  rubro         RubroPresupuestal @relation(fields: [rubroId], references: [id])
+  1181→  valor         Float
+  1182→  concepto      String?
+  1183→  terceroId     String?
+  1184→  estado        String            @default("vigente") // vigente | anulado | comprometido
+  1185→  saldo         Float             @default(0)
+  1186→  observaciones String?
+  1187→  createdAt     DateTime          @default(now())
+  1188→  crps          CRP[]
+  1189→
+  1190→  @@unique([empresaId, numero])
+  1191→  @@index([empresaId, fecha])
+  1192→}
+  1193→
+  1194→model CRP {
+  1195→  id        String   @id @default(cuid())
+  1196→  empresaId String
+  1197→  numero    String // CRP-2026-0001
+  1198→  cdpId     String
+  1199→  cdp       CDP      @relation(fields: [cdpId], references: [id], onDelete: Cascade)
+  1200→  fecha     DateTime @default(now())
+  1201→  valor     Float
+  1202→  concepto  String?
+  1203→  terceroId String?
+  1204→  estado    String   @default("vigente") // vigente | anulado | obligacion
+  1205→  saldo     Float    @default(0)
+  1206→  createdAt DateTime @default(now())
+  1207→
+  1208→  @@unique([empresaId, numero])
+  1209→  @@index([empresaId, fecha])
+  1210→}
+  1211→
+  1212→model ModificacionPresupuestal {
+  1213→  id             String   @id @default(cuid())
+  1214→  empresaId      String
+  1215→  numero         String // MP-2026-0001
+  1216→  fecha          DateTime @default(now())
+  1217→  tipo           String // adicion | traslado | reduccion
+  1218→  rubroOrigenId  String?
+  1219→  rubroDestinoId String?
+  1220→  valor          Float
+  1221→  motivo         String?
+  1222→  cdpId          String?
+  1223→  estado         String   @default("vigente")
+  1224→  createdAt      DateTime @default(now())
+  1225→
+  1226→  @@unique([empresaId, numero])
+  1227→  @@index([empresaId, fecha])
+  1228→}
+  1229→
+  1230→// ---------- Restaurante (Hermes §5.14) ----------
+  1231→
+  1232→model Mesa {
+  1233→  id        String    @id @default(cuid())
+  1234→  empresaId String
+  1235→  codigo    String
+  1236→  nombre    String
+  1237→  capacidad Int       @default(4)
+  1238→  ubicacion String? // Salon 1, Terraza, Barra...
+  1239→  posicionX Int       @default(0) // para mapa visual
+  1240→  posicionY Int       @default(0)
+  1241→  estado    String    @default("disponible") // disponible | ocupada | reservada | inactiva
+  1242→  createdAt DateTime  @default(now())
+  1243→  comandas  Comanda[]
+  1244→
+  1245→  @@unique([empresaId, codigo])
+  1246→  @@index([empresaId, estado])
+  1247→}
+  1248→
+  1249→model Comanda {
+  1250→  id            String           @id @default(cuid())
+  1251→  empresaId     String
+  1252→  mesaId        String
+  1253→  mesa          Mesa             @relation(fields: [mesaId], references: [id])
+  1254→  meseroId      String?
+  1255→  estado        String           @default("abierta") // abierta | facturada | anulada | cerrada
+  1256→  fechaApertura DateTime         @default(now())
+  1257→  fechaCierre   DateTime?
+  1258→  total         Float            @default(0)
+  1259→  observaciones String?
+  1260→  detalles      DetalleComanda[]
+  1261→  createdAt     DateTime         @default(now())
+  1262→
+  1263→  @@index([empresaId, estado])
+  1264→  @@index([mesaId, estado])
+  1265→}
+  1266→
+  1267→model DetalleComanda {
+  1268→  id             String    @id @default(cuid())
+  1269→  comandaId      String
+  1270→  comanda        Comanda   @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  1271→  empresaId      String
+  1272→  productoId     String?
+  1273→  descripcion    String
+  1274→  cantidad       Float     @default(1)
+  1275→  precioUnitario Float
+  1276→  subtotal       Float
+  1277→  observaciones  String? // sin sal, extra queso...
+  1278→  estado         String    @default("solicitado") // solicitado | preparando | listo | servido | anulado
+  1279→  horaSolicitud  DateTime  @default(now())
+  1280→  horaListo      DateTime?
+  1281→  createdAt      DateTime  @default(now())
+  1282→
+  1283→  @@index([comandaId])
+  1284→}
+  1285→
+  1286→// ---------- Hotelería (Hermes §5.15) ----------
+  1287→
+  1288→model Habitacion {
+  1289→  id            String         @id @default(cuid())
+  1290→  empresaId     String
+  1291→  codigo        String
+  1292→  numero        String
+  1293→  tipo          String         @default("sencilla") // sencilla | doble | suite | matrimonial
+  1294→  capacidad     Int            @default(2)
+  1295→  precioBase    Float          @default(0)
+  1296→  planta        Int            @default(1)
+  1297→  estado        String         @default("disponible") // disponible | ocupada | sucia | mantenimiento
+  1298→  createdAt     DateTime       @default(now())
+  1299→  reservaHotels ReservaHotel[]
+  1300→
+  1301→  @@unique([empresaId, codigo])
+  1302→  @@index([empresaId, estado])
+  1303→}
+  1304→
+  1305→model ReservaHotel {
+  1306→  id            String     @id @default(cuid())
+  1307→  empresaId     String
+  1308→  habitacionId  String
+  1309→  habitacion    Habitacion @relation(fields: [habitacionId], references: [id])
+  1310→  terceroId     String?
+  1311→  fechaCheckin  DateTime
+  1312→  fechaCheckout DateTime
+  1313→  noches        Int
+  1314→  tarifaNoche   Float
+  1315→  tarifaTotal   Float
+  1316→  estado        String     @default("confirmada") // confirmada | checkin | checkout | cancelada | no_show
+  1317→  observaciones String?
+  1318→  createdAt     DateTime   @default(now())
+  1319→
+  1320→  @@index([empresaId, fechaCheckin])
+  1321→  @@index([habitacionId, estado])
+  1322→}
+  1323→
+  1324→// ============================================================
+  1325→// FASE 4 — Verticales nicho + NIIF + Medios Magnéticos DIAN
+  1326→// ============================================================
+  1327→
+  1328→// ---------- Cafetero: Compra de café + Catación SCA (Hermes §5.16) ----------
+  1329→
+  1330→model Finca {
+  1331→  id            String       @id @default(cuid())
+  1332→  empresaId     String
+  1333→  nombre        String
+  1334→  ubicacion     String?
+  1335→  municipio     String?
+  1336→  propietarioId String?
+  1337→  hectareas     Float?
+  1338→  altura        Int? // metros sobre el nivel del mar
+  1339→  sombra        Boolean      @default(false)
+  1340→  observaciones String?
+  1341→  createdAt     DateTime     @default(now())
+  1342→  compras       CompraCafe[]
+  1343→
+  1344→  @@index([empresaId])
+  1345→}
+  1346→
+  1347→model CompraCafe {
+  1348→  id                String              @id @default(cuid())
+  1349→  empresaId         String
+  1350→  numero            String // CAF-2026-0001
+  1351→  terceroId         String?
+  1352→  fincaId           String?
+  1353→  finca             Finca?              @relation(fields: [fincaId], references: [id])
+  1354→  fecha             DateTime            @default(now())
+  1355→  // Pesaje físico
+  1356→  pesoBruto         Float // kg brutos
+  1357→  tara              Float               @default(0) // envases/sacos
+  1358→  pesoNeto          Float // calculado
+  1359→  factorRendimiento Float               @default(0) // % pasilla/defecto
+  1360→  humedad           Float               @default(0) // %
+  1361→  // Liquidación
+  1362→  precioBaseKg      Float // precio por kg de café pergamino
+  1363→  valorBruto        Float // pesoNeto * precioBaseKg
+  1364→  descuentos        Float               @default(0) // humedad, broca, etc.
+  1365→  retenciones       Float               @default(0) // retefuente 0.5%
+  1366→  valorPagar        Float // valorBruto - descuentos - retenciones
+  1367→  estado            String              @default("vigente") // vigente | liquidado | pagado | anulado
+  1368→  observaciones     String?
+  1369→  // Control de calidad (1-1)
+  1370→  controlCalidad    ControlCalidadCafe?
+  1371→  createdAt         DateTime            @default(now())
+  1372→
+  1373→  @@unique([empresaId, numero])
+  1374→  @@index([empresaId, fecha])
+  1375→}
+  1376→
+  1377→model ControlCalidadCafe {
+  1378→  id              String     @id @default(cuid())
+  1379→  empresaId       String
+  1380→  compraCafeId    String     @unique
+  1381→  compraCafe      CompraCafe @relation(fields: [compraCafeId], references: [id], onDelete: Cascade)
+  1382→  fecha           DateTime   @default(now())
+  1383→  // Análisis físico (almendra)
+  1384→  almendraSana    Float      @default(0) // %
+  1385→  broca           Float      @default(0) // %
+  1386→  huecos          Float      @default(0) // %
+  1387→  hongos          Float      @default(0) // %
+  1388→  defectosTotales Float      @default(0) // %
+  1389→  // Prueba de taza / catación (SCA 100 pts)
+  1390→  catacionId      String?
+  1391→  createdAt       DateTime   @default(now())
+  1392→}
+  1393→
+  1394→model PruebaTaza {
+  1395→  id               String   @id @default(cuid())
+  1396→  empresaId        String
+  1397→  controlCalidadId String?
+  1398→  fecha            DateTime @default(now())
+  1399→  catador          String?
+  1400→  // Atributos SCA (0-10 cada uno)
+  1401→  fragranciaAroma  Float    @default(0)
+  1402→  sabor            Float    @default(0)
+  1403→  saborResidual    Float    @default(0)
+  1404→  acidez           Float    @default(0)
+  1405→  cuerpo           Float    @default(0)
+  1406→  balance          Float    @default(0)
+  1407→  uniformidad      Float    @default(0)
+  1408→  tazaLimpia       Float    @default(0)
+  1409→  dulzor           Float    @default(0)
+  1410→  puntajeTotal     Float    @default(0) // suma
+  1411→  observaciones    String?
+  1412→  createdAt        DateTime @default(now())
+  1413→
+  1414→  @@index([empresaId, fecha])
+  1415→}
+  1416→
+  1417→// ---------- Servicios Públicos: Lecturas masivas (Hermes §5.17) ----------
+  1418→
+  1419→model UsuarioServicio {
+  1420→  id              String           @id @default(cuid())
+  1421→  empresaId       String
+  1422→  terceroId       String?
+  1423→  numeroContrato  String
+  1424→  direccion       String
+  1425→  estrato         Int              @default(1) // 1-6
+  1426→  uso             String           @default("residencial") // residencial|comercial|industrial|oficial
+  1427→  consumoPromedio Float            @default(0) // histórico
+  1428→  tarifaFija      Float            @default(0) // cargo fijo
+  1429→  tarifaVariable  Float            @default(0) // por unidad de consumo
+  1430→  medidor         String? // # de medidor
+  1431→  estado          String           @default("activo")
+  1432→  createdAt       DateTime         @default(now())
+  1433→  lecturaMedidors LecturaMedidor[]
+  1434→
+  1435→  @@unique([empresaId, numeroContrato])
+  1436→  @@index([empresaId])
+  1437→}
+  1438→
+  1439→model BloqueFacturacion {
+  1440→  id        String   @id @default(cuid())
+  1441→  empresaId String
+  1442→  codigo    String
+  1443→  nombre    String
+  1444→  ciclo     Int // 1-12 (mensual, bimestral, etc.)
+  1445→  diaCorte  Int // día del mes para corte
+  1446→  diaPago   Int // día límite de pago
+  1447→  activo    Boolean  @default(true)
+  1448→  createdAt DateTime @default(now())
+  1449→
+  1450→  @@unique([empresaId, codigo])
+  1451→}
+  1452→
+  1453→model LecturaMedidor {
+  1454→  id                  String          @id @default(cuid())
+  1455→  empresaId           String
+  1456→  usuarioServicioId   String
+  1457→  usuarioServicio     UsuarioServicio @relation(fields: [usuarioServicioId], references: [id], onDelete: Cascade)
+  1458→  bloqueFacturacionId String?
+  1459→  fechaLectura        DateTime        @default(now())
+  1460→  lecturaAnterior     Float
+  1461→  lecturaActual       Float
+  1462→  consumo             Float // calculado = actual - anterior
+  1463→  observaciones       String?
+  1464→  facturada           Boolean         @default(false)
+  1465→  facturaId           String?
+  1466→  createdAt           DateTime        @default(now())
+  1467→
+  1468→  @@index([empresaId, fechaLectura])
+  1469→  @@index([usuarioServicioId])
+  1470→}
+  1471→
+  1472→model TarifaServicio {
+  1473→  id           String   @id @default(cuid())
+  1474→  empresaId    String
+  1475→  tipoServicio String // agua|energia|gas|aseo
+  1476→  estrato      Int
+  1477→  uso          String
+  1478→  rangoDesde   Float // m³ o kWh desde
+  1479→  rangoHasta   Float // m³ o kWh hasta
+  1480→  tarifa       Float // precio por unidad
+  1481→  cargoFijo    Float    @default(0)
+  1482→  activa       Boolean  @default(true)
+  1483→  createdAt    DateTime @default(now())
+  1484→
+  1485→  @@index([empresaId, tipoServicio])
+  1486→}
+  1487→
+  1488→// ---------- Taller / Servicio Técnico (Hermes §5.18) ----------
+  1489→
+  1490→model OrdenServicioTecnico {
+  1491→  id                      String                   @id @default(cuid())
+  1492→  empresaId               String
+  1493→  numero                  String // OST-2026-0001
+  1494→  terceroId               String?
+  1495→  fechaIngreso            DateTime                 @default(now())
+  1496→  fechaEntrega            DateTime?
+  1497→  estado                  String                   @default("ingresado") // ingresado|diagnostico|en_reparacion|listo|entregado|anulado
+  1498→  // Equipo
+  1499→  equipo                  String
+  1500→  marca                   String?
+  1501→  modelo                  String?
+  1502→  serial                  String?
+  1503→  // Problema y diagnóstico
+  1504→  problemaReportado       String
+  1505→  diagnostico             String?
+  1506→  observaciones           String?
+  1507→  tecnicoAsignadoId       String?
+  1508→  valorRepuestos          Float                    @default(0)
+  1509→  valorManoObra           Float                    @default(0)
+  1510→  valorTotal              Float                    @default(0)
+  1511→  facturaId               String?
+  1512→  createdAt               DateTime                 @default(now())
+  1513→  detalleServicioTecnicos DetalleServicioTecnico[]
+  1514→
+  1515→  @@unique([empresaId, numero])
+  1516→  @@index([empresaId, estado])
+  1517→  @@index([empresaId, fechaIngreso])
+  1518→}
+  1519→
+  1520→model DetalleServicioTecnico {
+  1521→  id             String               @id @default(cuid())
+  1522→  ordenId        String
+  1523→  orden          OrdenServicioTecnico @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  1524→  empresaId      String
+  1525→  tipo           String // repuesto|mano_obra|insumo
+  1526→  descripcion    String
+  1527→  cantidad       Float                @default(1)
+  1528→  precioUnitario Float
+  1529→  subtotal       Float
+  1530→  createdAt      DateTime             @default(now())
+  1531→
+  1532→  @@index([ordenId])
+  1533→}
+  1534→
+  1535→// ---------- Vehículos y Mascotas (Hermes §5.19) ----------
+  1536→
+  1537→model Vehiculo {
+  1538→  id            String   @id @default(cuid())
+  1539→  empresaId     String
+  1540→  terceroId     String?
+  1541→  placa         String
+  1542→  marca         String
+  1543→  modelo        String
+  1544→  anio          Int
+  1545→  color         String?
+  1546→  kilometraje   Int      @default(0)
+  1547→  tipo          String   @default("particular") // particular|publico|carga|moto
+  1548→  observaciones String?
+  1549→  createdAt     DateTime @default(now())
+  1550→
+  1551→  @@unique([empresaId, placa])
+  1552→  @@index([empresaId])
+  1553→}
+  1554→
+  1555→model Mascota {
+  1556→  id              String    @id @default(cuid())
+  1557→  empresaId       String
+  1558→  terceroId       String?
+  1559→  nombre          String
+  1560→  especie         String // perro|gato|ave|...
+  1561→  raza            String?
+  1562→  sexo            String? // M|H
+  1563→  fechaNacimiento DateTime?
+  1564→  color           String?
+  1565→  microchip       String?
+  1566→  observaciones   String?
+  1567→  createdAt       DateTime  @default(now())
+  1568→
+  1569→  @@index([empresaId])
+  1570→}
+  1571→
+  1572→// ---------- Medios Magnéticos DIAN ----------
+  1573→
+  1574→model MedioMagnetico {
+  1575→  id                     String                  @id @default(cuid())
+  1576→  empresaId              String
+  1577→  anio                   Int // vigencia fiscal (2026)
+  1578→  formato                String // 1007|2276|2277|1647|2238
+  1579→  nombre                 String // "Certificados de retención 2026"
+  1580→  estado                 String                  @default("borrador") // borrador|generado|enviado
+  1581→  fechaGeneracion        DateTime?
+  1582→  archivo                String? // ruta del archivo .txt generado
+  1583→  totalRegistros         Int                     @default(0)
+  1584→  userId                 String?
+  1585→  createdAt              DateTime                @default(now())
+  1586→  medioMagneticoDetalles MedioMagneticoDetalle[]
+  1587→
+  1588→  @@unique([empresaId, anio, formato])
+  1589→  @@index([empresaId, anio])
+  1590→}
+  1591→
+  1592→model MedioMagneticoDetalle {
+  1593→  id              String         @id @default(cuid())
+  1594→  medioId         String
+  1595→  medio           MedioMagnetico @relation(fields: [medioId], references: [id], onDelete: Cascade)
+  1596→  // Estructura general tipo formato 1007
+  1597→  tipoDocExpedida String? // CC|NIT|CE
+  1598→  nitTercero      String
+  1599→  razonSocial     String
+  1600→  concepto        String // RETEFUENTE|RETEIVA|RETEICA
+  1601→  valorPago       Float
+  1602→  baseRetencion   Float          @default(0)
+  1603→  porcentaje      Float          @default(0)
+  1604→  valorRetenido   Float          @default(0)
+  1605→  ciudad          String?
+  1606→  createdAt       DateTime       @default(now())
+  1607→
+  1608→  @@index([medioId])
+  1609→}
+  1610→
+  1611→// ---------- NIIF / IFRS ----------
+  1612→
+  1613→model ReporteNIIF {
+  1614→  id          String   @id @default(cuid())
+  1615→  empresaId   String
+  1616→  tipo        String // ESF|EER|ECP|EFE|Notas
+  1617→  periodo     String // anual|trimestral
+  1618→  fechaInicio DateTime
+  1619→  fechaFin    DateTime
+  1620→  json_data   String // JSON con el reporte completo estructurado
+  1621→  archivo     String? // PDF generado
+  1622→  userId      String?
+  1623→  createdAt   DateTime @default(now())
+  1624→
+  1625→  @@index([empresaId, tipo, fechaFin])
+  1626→}
+  1627→
+  1628→model CuentaNIIF {
+  1629→  id          String   @id @default(cuid())
+  1630→  empresaId   String
+  1631→  codigoNIIF  String // código IFRS taxonomy
+  1632→  nombre      String
+  1633→  categoria   String // activo_corriente|activo_no_corriente|pasivo_corriente|pasivo_no_corriente|patrimonio|ingreso|gasto
+  1634→  saldoActual Float    @default(0)
+  1635→  cuentaPucId String? // mapeo al PUC colombiano
+  1636→  createdAt   DateTime @default(now())
+  1637→
+  1638→  @@unique([empresaId, codigoNIIF])
+  1639→  @@index([empresaId, categoria])
+  1640→}
+  1641→

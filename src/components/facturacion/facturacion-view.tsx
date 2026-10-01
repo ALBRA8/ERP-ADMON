@@ -42,6 +42,9 @@ import {
   ShoppingCart,
   Keyboard,
   Store,
+  WifiOff,
+  Wifi,
+  CloudOff,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -104,6 +107,8 @@ import {
   ToggleGroupItem,
 } from "@/components/ui/toggle-group";
 import { Separator } from "@/components/ui/separator";
+import { useOfflinePos } from "@/hooks/use-offline-pos";
+import { SyncStatusCard } from "@/components/pwa/sync-status-card";
 
 // ---------- Tipos ----------
 
@@ -255,6 +260,45 @@ function computeTotals(items: ItemLine[]) {
   };
 }
 
+// ---------- CUFE mock (client-side, mismo algoritmo que el backend) ----------
+// CUFE = SHA256(numFac + fecFac + horFac + valTotal + codDoc +
+//                nitFac + tipAdq + nitPAC + clTec + soporte + ambiente)
+// Usamos SubtleCrypto del browser para evitar dependencias externas.
+// NOTA: en producción el CUFE real requiere SHA-384 + certificado digital,
+// pero el mock del backend usa SHA-256 con la misma concatenación.
+async function mockCufe(params: {
+  numFac: string;
+  nitCliente: string;
+  total: number;
+}): Promise<string> {
+  try {
+    const ahora = new Date();
+    const fecFac = ahora.toISOString().slice(0, 10);
+    const horFac = ahora.toTimeString().slice(0, 8);
+    const partes = [
+      params.numFac,
+      fecFac,
+      horFac,
+      String(params.total),
+      "01", // CodDoc: 01=Factura venta electrónica
+      params.nitCliente || "0",
+      "1", // TipAdq: 1=Contribuyente
+      "", // nitPAC (vacío en mock)
+      "", // clTec
+      "", // soporte
+      "0", // ambiente: pruebas
+    ];
+    const data = new TextEncoder().encode(partes.join(""));
+    const hashBuf = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    // Fallback simple si SubtleCrypto no está disponible
+    return "OFFLINE-CUFE-" + params.numFac + "-" + Date.now();
+  }
+}
+
 // ---------- Badges ----------
 
 function estadoDianBadge(estado: string) {
@@ -361,15 +405,74 @@ function formaPagoBadge(fp?: string | null) {
 // ============================================================
 export function FacturacionView() {
   const [tab, setTab] = useState<string>("lista");
+  const offline = useOfflinePos();
+
+  // Cuando vuelve la conexión y hay pendientes, avisa al usuario
+  const prevOnline = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (prevOnline.current === false && offline.isOnline && offline.pendingCount > 0) {
+      toast.info("Sincronizando facturas pendientes", {
+        description: `${offline.pendingCount} factura(s) en cola...`,
+      });
+    }
+    prevOnline.current = offline.isOnline;
+  }, [offline.isOnline, offline.pendingCount]);
+
+  // Cuando el SW termina una sincronización exitosa, avisa
+  const prevPending = useRef<number>(offline.pendingCount);
+  useEffect(() => {
+    if (
+      prevPending.current > 0 &&
+      offline.pendingCount === 0 &&
+      offline.isOnline
+    ) {
+      toast.success("Facturas sincronizadas correctamente", {
+        description: "Todas las facturas pendientes fueron enviadas a la DIAN.",
+      });
+    }
+    prevPending.current = offline.pendingCount;
+  }, [offline.pendingCount, offline.isOnline]);
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-4">
+      <SyncStatusCard />
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div>
             <h2 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
               <Receipt className="size-5 text-emerald-600 dark:text-emerald-400" />
               Facturación de Venta
+              <Badge
+                variant="outline"
+                className={`text-xs ${
+                  offline.isOnline
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                    : "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+                }`}
+                title={offline.isOnline ? "Conexión activa" : "Sin conexión — modo POS local"}
+              >
+                {offline.isOnline ? (
+                  <>
+                    <Wifi className="size-3 mr-1" />
+                    Online
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="size-3 mr-1" />
+                    Offline — modo POS local
+                  </>
+                )}
+              </Badge>
+              {offline.pendingCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="text-xs border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                  title={`${offline.pendingCount} factura(s) pendiente(s) de sincronización`}
+                >
+                  <CloudOff className="size-3 mr-1" />
+                  {offline.pendingCount} pendiente(s)
+                </Badge>
+              )}
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
               Emisión de facturas electrónicas (DIAN) y POS, con cálculo de
@@ -581,6 +684,10 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
   const [bodegas, setBodegas] = useState<Bodega[]>([]);
   const [loadingCatalogos, setLoadingCatalogos] = useState(true);
 
+  // Offline / PWA
+  const offline = useOfflinePos();
+  const { isOnline, cachedProducts, cachedClients } = offline;
+
   // Form state
   const [clienteSel, setClienteSel] = useState<Tercero | null>(null);
   const [clienteComboboxOpen, setClienteComboboxOpen] = useState(false);
@@ -612,32 +719,72 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
     cufe?: string;
     total: number;
     cambio?: number;
+    offline?: boolean;
+    localId?: string;
   } | null>(null);
 
   // ---------- Carga catálogos ----------
+  // Cuando hay conexión, descarga y cachea en IndexedDB (offline-first).
+  // Cuando está offline, usa la cache local.
   const cargarClientes = useCallback(async () => {
+    if (!isOnline) {
+      setClientes(cachedClients as unknown as Tercero[]);
+      return;
+    }
     try {
       const r = await fetch("/api/terceros?pageSize=200&tipo=cliente");
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Error");
-      setClientes((d.items ?? []) as Tercero[]);
+      const items = (d.items ?? []) as Tercero[];
+      setClientes(items);
+      // Cachea para uso offline
+      await offline.cacheClients();
     } catch (e: any) {
-      toast.error("No se pudo cargar clientes", { description: e?.message });
+      // Si falla pero hay cache, usa cache
+      if (cachedClients.length > 0) {
+        setClientes(cachedClients as unknown as Tercero[]);
+      } else {
+        toast.error("No se pudo cargar clientes", { description: e?.message });
+      }
     }
-  }, []);
+  }, [isOnline, cachedClients, offline]);
 
   const cargarProductos = useCallback(async () => {
+    if (!isOnline) {
+      setProductos(cachedProducts as unknown as Producto[]);
+      return;
+    }
     try {
       const r = await fetch("/api/productos?pageSize=500");
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Error");
-      setProductos((d.items ?? []) as Producto[]);
+      const items = (d.items ?? []) as Producto[];
+      setProductos(items);
+      // Cachea para uso offline
+      await offline.cacheProducts();
     } catch (e: any) {
-      toast.error("No se pudo cargar productos", { description: e?.message });
+      if (cachedProducts.length > 0) {
+        setProductos(cachedProducts as unknown as Producto[]);
+      } else {
+        toast.error("No se pudo cargar productos", { description: e?.message });
+      }
     }
-  }, []);
+  }, [isOnline, cachedProducts, offline]);
 
   const cargarBodegas = useCallback(async () => {
+    if (!isOnline) {
+      // Offline: usar bodegas cacheadas en productos (mejor que nada)
+      const bodegasMap = new Map<string, Bodega>();
+      for (const p of cachedProducts) {
+        for (const b of p.bodegas ?? []) {
+          if (!bodegasMap.has(b.bodegaId)) {
+            bodegasMap.set(b.bodegaId, { id: b.bodegaId, codigo: b.bodegaId.slice(0, 6), nombre: "Bodega " + b.bodegaId.slice(-4) });
+          }
+        }
+      }
+      setBodegas(Array.from(bodegasMap.values()));
+      return;
+    }
     try {
       const r = await fetch("/api/bodegas");
       const d = await r.json();
@@ -646,7 +793,7 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
     } catch (e: any) {
       toast.error("No se pudo cargar bodegas", { description: e?.message });
     }
-  }, []);
+  }, [isOnline, cachedProducts]);
 
   useEffect(() => {
     (async () => {
@@ -838,30 +985,37 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
       nombreCliente = clienteSel.nombre;
       nitCliente = clienteSel.numeroDocumento;
     } else if (showNuevoCliente && nuevoClienteNombre.trim() && nuevoClienteNIT.trim()) {
-      // Crear cliente antes de emitir
-      setCreatingCliente(true);
-      try {
-        const r = await fetch("/api/terceros", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tipo: "cliente",
-            tipoDocumento: nuevoClienteNIT.trim().length > 5 ? "NIT" : "CC",
-            numeroDocumento: nuevoClienteNIT.trim(),
-            nombre: nuevoClienteNombre.trim(),
-          }),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error ?? "Error al crear cliente");
-        terceroId = (d as Tercero).id;
-        nombreCliente = (d as Tercero).nombre;
-        nitCliente = (d as Tercero).numeroDocumento;
-      } catch (e: any) {
-        toast.error("No se pudo crear el cliente", { description: e?.message });
+      // Si offline, no se puede crear cliente en línea — usamos el NIT/nombre como provisional
+      if (!isOnline) {
+        terceroId = undefined;
+        nombreCliente = nuevoClienteNombre.trim();
+        nitCliente = nuevoClienteNIT.trim();
+      } else {
+        // Crear cliente antes de emitir
+        setCreatingCliente(true);
+        try {
+          const r = await fetch("/api/terceros", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tipo: "cliente",
+              tipoDocumento: nuevoClienteNIT.trim().length > 5 ? "NIT" : "CC",
+              numeroDocumento: nuevoClienteNIT.trim(),
+              nombre: nuevoClienteNombre.trim(),
+            }),
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error ?? "Error al crear cliente");
+          terceroId = (d as Tercero).id;
+          nombreCliente = (d as Tercero).nombre;
+          nitCliente = (d as Tercero).numeroDocumento;
+        } catch (e: any) {
+          toast.error("No se pudo crear el cliente", { description: e?.message });
+          setCreatingCliente(false);
+          return;
+        }
         setCreatingCliente(false);
-        return;
       }
-      setCreatingCliente(false);
     } else {
       toast.error("Selecciona o crea un cliente");
       return;
@@ -894,6 +1048,48 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
         payload.fechaVencimiento = fechaVencimiento;
       }
 
+      // ---------- Modo OFFLINE ----------
+      // Si no hay conexión, encolamos en IndexedDB y respondemos OK simulada.
+      // El SW hace background sync cuando vuelve la conexión.
+      if (!isOnline) {
+        const provisionalNumber = `OFFLINE-${Date.now()}`;
+        // CUFE mock (mismo algoritmo que el backend, sin certificado)
+        const cufeMock = await mockCufe({
+          numFac: provisionalNumber,
+          nitCliente,
+          total: totales.total,
+        });
+        const rec = await offline.enqueueInvoice({
+          payload,
+          provisionalNumber,
+          total: totales.total,
+        });
+        setExito({
+          numero: provisionalNumber,
+          cufe: cufeMock,
+          total: totales.total,
+          cambio: formaPago === "efectivo" ? round2(efectivoRecibido - totales.total) : undefined,
+          offline: true,
+          localId: rec.localId,
+        });
+        toast.success("Factura encolada offline", {
+          description: `${offline.pendingCount + 1} pendiente(s). Se sincronizará al recuperar conexión.`,
+        });
+        // Reset para la siguiente factura
+        setItems([]);
+        setSelectedItemKey(null);
+        setEfectivoRecibido(0);
+        setObservaciones("");
+        setClienteSel(null);
+        setShowNuevoCliente(false);
+        setNuevoClienteNombre("");
+        setNuevoClienteNIT("");
+        return;
+      }
+
+      // ---------- Modo ONLINE ----------
+      // El SW intercepta el fetch si la red cae mientras se hace el POST;
+      // en ese caso d vendendrá con { offline: true, localId, numero, ... }
       const r = await fetch("/api/facturas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -904,15 +1100,29 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
         throw new Error(d.error ?? "Error al emitir factura");
       }
       const f = d as any;
-      setExito({
-        numero: f.numero,
-        cufe: f.cufe,
-        total: f.total,
-        cambio: f.cambio,
-      });
-      toast.success("Factura emitida", {
-        description: `${f.numero} · ${formatCurrency(f.total)}`,
-      });
+      if (f.offline) {
+        // El SW encoló la factura porque se cayó la conexión durante el POST
+        setExito({
+          numero: f.numero,
+          cufe: "OFFLINE-PENDING-SYNC",
+          total: f.total,
+          offline: true,
+          localId: f.localId,
+        });
+        toast.success("Factura encolada offline", {
+          description: `Se sincronizará al recuperar conexión.`,
+        });
+      } else {
+        setExito({
+          numero: f.numero,
+          cufe: f.cufe,
+          total: f.total,
+          cambio: f.cambio,
+        });
+        toast.success("Factura emitida", {
+          description: `${f.numero} · ${formatCurrency(f.total)}`,
+        });
+      }
       // Reset
       setItems([]);
       setSelectedItemKey(null);
@@ -923,6 +1133,45 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
       setNuevoClienteNombre("");
       setNuevoClienteNIT("");
     } catch (e: any) {
+      // Si el fetch lanzó (TypeError: Failed to fetch) probablemente es offline
+      // y el SW no llegó a encolar (puede pasar si el SW aún no está activo).
+      if (e?.name === "TypeError" && /fetch/i.test(String(e?.message ?? ""))) {
+        const provisionalNumber = `OFFLINE-${Date.now()}`;
+        const cufeMock = await mockCufe({
+          numFac: provisionalNumber,
+          nitCliente,
+          total: totales.total,
+        });
+        try {
+          const rec = await offline.enqueueInvoice({
+            payload,
+            provisionalNumber,
+            total: totales.total,
+          });
+          setExito({
+            numero: provisionalNumber,
+            cufe: cufeMock,
+            total: totales.total,
+            cambio: formaPago === "efectivo" ? round2(efectivoRecibido - totales.total) : undefined,
+            offline: true,
+            localId: rec.localId,
+          });
+          toast.success("Factura encolada offline", {
+            description: `Se sincronizará al recuperar conexión.`,
+          });
+          setItems([]);
+          setSelectedItemKey(null);
+          setEfectivoRecibido(0);
+          setObservaciones("");
+          setClienteSel(null);
+          setShowNuevoCliente(false);
+          setNuevoClienteNombre("");
+          setNuevoClienteNIT("");
+          return;
+        } catch (e2: any) {
+          // falla al encolar — error general abajo
+        }
+      }
       toast.error("No se pudo emitir factura", { description: e?.message });
     } finally {
       setSaving(false);
@@ -939,6 +1188,9 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
     efectivoRecibido,
     fechaVencimiento,
     observaciones,
+    isOnline,
+    offline,
+    totales.total,
   ]);
 
   // ---------- Atajos de teclado ----------
@@ -1578,20 +1830,55 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
       <Dialog open={!!exito} onOpenChange={(o) => !o && setExito(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="size-5" />
-              Factura emitida
+            <DialogTitle
+              className={`flex items-center gap-2 ${
+                exito?.offline
+                  ? "text-amber-700 dark:text-amber-400"
+                  : "text-emerald-700 dark:text-emerald-400"
+              }`}
+            >
+              {exito?.offline ? (
+                <CloudOff className="size-5" />
+              ) : (
+                <CheckCircle2 className="size-5" />
+              )}
+              {exito?.offline
+                ? "Factura encolada offline"
+                : "Factura emitida"}
             </DialogTitle>
             <DialogDescription>
-              La factura fue registrada exitosamente ante la DIAN.
+              {exito?.offline
+                ? "La factura se guardó localmente y se sincronizará con la DIAN cuando se recupere la conexión."
+                : "La factura fue registrada exitosamente ante la DIAN."}
             </DialogDescription>
           </DialogHeader>
           {exito && (
             <div className="space-y-3">
+              {exito.offline && (
+                <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                  <CloudOff className="size-4 shrink-0 mt-0.5" />
+                  <div>
+                    Esta factura tiene número provisional{" "}
+                    <span className="font-mono font-semibold">{exito.numero}</span>{" "}
+                    y quedará en cola para sincronización automática.
+                    {exito.localId && (
+                      <div className="mt-1 text-[10px] text-muted-foreground">
+                        ID local: <span className="font-mono">{exito.localId.slice(0, 16)}…</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/40 p-3 space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Número</span>
-                  <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span
+                    className={`font-mono font-semibold ${
+                      exito.offline
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-emerald-700 dark:text-emerald-400"
+                    }`}
+                  >
                     {exito.numero}
                   </span>
                 </div>
@@ -1607,7 +1894,9 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
                 )}
                 {exito.cufe && (
                   <div>
-                    <span className="text-muted-foreground text-xs">CUFE</span>
+                    <span className="text-muted-foreground text-xs">
+                      CUFE {exito.offline && <span className="italic">(provisional)</span>}
+                    </span>
                     <div className="font-mono text-[10px] break-all bg-white dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded p-2 mt-1">
                       {exito.cufe}
                     </div>
@@ -1620,9 +1909,15 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
             <Button
               variant="outline"
               onClick={() => {
-                toast.info("Impresión", {
-                  description: "La impresión de la factura electrónica será habilitada próximamente.",
-                });
+                if (exito?.offline) {
+                  toast.info("Impresión offline", {
+                    description: "Se imprimirá la versión provisional. La versión DIAN se reemitirá tras sincronizar.",
+                  });
+                } else {
+                  toast.info("Impresión", {
+                    description: "La impresión de la factura electrónica será habilitada próximamente.",
+                  });
+                }
               }}
             >
               <Printer className="size-4" />
@@ -1631,11 +1926,15 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
             <Button
               onClick={() => {
                 setExito(null);
-                onDone();
+                // En modo offline, NO cerramosos la pestaña "nueva factura":
+                // el cajero suele emitir varias facturas seguidas.
+                if (!exito?.offline) {
+                  onDone();
+                }
               }}
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              Ver facturas
+              {exito?.offline ? "Nueva factura" : "Ver facturas"}
             </Button>
           </DialogFooter>
         </DialogContent>

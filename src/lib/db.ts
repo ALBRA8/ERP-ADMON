@@ -55,6 +55,18 @@ function hasAllModels(client: PrismaClient | undefined): boolean {
     "detalleComanda",
     "habitacion",
     "reservaHotel",
+    "finca",
+    "compraCafe",
+    "controlCalidadCafe",
+    "pruebaTaza",
+    "usuarioServicio",
+    "bloqueFacturacion",
+    "lecturaMedidor",
+    "tarifaServicio",
+    "ordenServicioTecnico",
+    "detalleServicioTecnico",
+    "vehiculo",
+    "mascota",
   ];
   return required.every((m) => (client as any)[m] !== undefined);
 }

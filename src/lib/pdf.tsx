@@ -2001,3 +2001,585 @@ export async function generarPDFExtractoBancario(
   );
   return await renderToBuffer(doc);
 }
+
+// ============================================================
+// 14-17. ESTADOS FINANCIEROS NIIF (IFRS)
+//
+//   generarPDFESF(empresaId, fechaFin) — Estado de Situación Financiera
+//   generarPDFEER(empresaId, fechaInicio, fechaFin) — Estado de Resultado Integral
+//   generarPDFECP(empresaId, fechaInicio, fechaFin) — Cambios en el Patrimonio
+//   generarPDFFE(empresaId, fechaInicio, fechaFin) — Flujos de Efectivo
+//
+// Todos con layout profesional: header con datos empresa, tabla con
+// cuentas y valores, totales destacados, footer con notas y firma.
+// ============================================================
+
+import {
+  generarESF,
+  generarEER,
+  generarECP,
+  generarEFE,
+  type ESFResult,
+  type EERResult,
+  type ECPResult,
+  type EFEResult,
+} from "@/lib/niif";
+import type { SaldoLine } from "@/lib/niif-mapping";
+
+// Componente reutilizable: fila de tabla NIIF (cuenta | nombre | valor)
+function NiifTableRow({
+  codigo,
+  nombre,
+  valor,
+  bold,
+  alt,
+  indent,
+  color,
+}: {
+  codigo?: string;
+  nombre: string;
+  valor: number | string;
+  bold?: boolean;
+  alt?: boolean;
+  indent?: number;
+  color?: string;
+}) {
+  const valStr = typeof valor === "string" ? valor : fmtCOP(valor);
+  return (
+    <View
+      style={[
+        styles.tableRow,
+        alt ? styles.tableRowAlt : {},
+        { backgroundColor: bold ? COLORS.primaryLight : alt ? "#f1f5f9" : "#ffffff" },
+      ]}
+    >
+      <Text
+        style={[
+          styles.tableCol,
+          {
+            width: "12%",
+            fontWeight: bold ? "bold" : "normal",
+            color: color ?? COLORS.textDark,
+            paddingLeft: 4 + (indent ?? 0) * 12,
+          },
+        ]}
+      >
+        {codigo ?? ""}
+      </Text>
+      <Text
+        style={[
+          styles.tableCol,
+          {
+            width: "60%",
+            fontWeight: bold ? "bold" : "normal",
+            color: color ?? COLORS.textDark,
+          },
+        ]}
+      >
+        {nombre}
+      </Text>
+      <Text
+        style={[
+          styles.tableCol,
+          {
+            width: "28%",
+            textAlign: "right",
+            fontWeight: bold ? "bold" : "normal",
+            color: color ?? COLORS.textDark,
+          },
+        ]}
+      >
+        {valStr}
+      </Text>
+    </View>
+  );
+}
+
+// Encabezado de tabla NIIF
+function NiifTableHeader() {
+  return (
+    <View style={styles.tableRow}>
+      <Text style={[styles.tableColHeader, { width: "12%" }]}>Código</Text>
+      <Text style={[styles.tableColHeader, { width: "60%" }]}>Descripción</Text>
+      <Text style={[styles.tableColHeader, { width: "28%", textAlign: "right" }]}>
+        Valor (COP)
+      </Text>
+    </View>
+  );
+}
+
+// Bloque de notas y firma
+function NotasYFirma() {
+  return (
+    <View style={styles.section} break>
+      <Text style={styles.sectionTitle}>Notas a los estados financieros</Text>
+      <Text style={[styles.notaText, { fontSize: 8 }]}>
+        1. Los estados financieros se preparan conforme a las Normas Internacionales de Información Financiera (NIIF/IFRS) emitidas por el IASB.
+      </Text>
+      <Text style={[styles.notaText, { fontSize: 8 }]}>
+        2. Las cifras se expresan en pesos colombianos (COP) y están redondeadas al peso más cercano.
+      </Text>
+      <Text style={[styles.notaText, { fontSize: 8 }]}>
+        3. La base de medición utilizada es el costo histórico, salvo donde se indique lo contrario.
+      </Text>
+      <Text style={[styles.notaText, { fontSize: 8 }]}>
+        4. El impuesto de renta se calcula a la tarifa vigente del 33% conforme a la NIC 12.
+      </Text>
+
+      <View style={{ marginTop: 30, flexDirection: "row", justifyContent: "space-around" }}>
+        <View style={{ alignItems: "center" }}>
+          <View style={{ width: 200, borderTopWidth: 0.5, borderTopColor: COLORS.textMuted, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 8, textAlign: "center", color: COLORS.textMuted }}>
+              Preparado por
+            </Text>
+            <Text style={{ fontSize: 9, fontWeight: "bold", textAlign: "center" }}>
+              Contador Público
+            </Text>
+            <Text style={{ fontSize: 8, textAlign: "center", color: COLORS.textMuted }}>
+              Tarjeta Profesional No. _______
+            </Text>
+          </View>
+        </View>
+        <View style={{ alignItems: "center" }}>
+          <View style={{ width: 200, borderTopWidth: 0.5, borderTopColor: COLORS.textMuted, paddingVertical: 4 }}>
+            <Text style={{ fontSize: 8, textAlign: "center", color: COLORS.textMuted }}>
+              Representante Legal
+            </Text>
+            <Text style={{ fontSize: 9, fontWeight: "bold", textAlign: "center" }}>
+              {""}
+            </Text>
+            <Text style={{ fontSize: 8, textAlign: "center", color: COLORS.textMuted }}>
+              C.C. _______
+            </Text>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ============================================================
+// 14. PDF ESTADO DE SITUACIÓN FINANCIERA (ESF)
+// ============================================================
+
+export async function generarPDFESF(
+  empresaId: string,
+  fechaFin: string,
+): Promise<Buffer> {
+  const empresa = await cargarEmpresa(empresaId);
+  if (!empresa) throw new Error("Empresa no encontrada");
+  const data = await generarESF(empresaId, fechaFin);
+
+  const fechaTexto = fmtFecha(data.fechaFin);
+
+  const renderSeccion = (
+    titulo: string,
+    seccion: { lineas: SaldoLine[]; total: number },
+    indent = 0,
+  ) => (
+    <View key={titulo} style={{ marginTop: 4 }}>
+      <Text style={[styles.sectionTitle, { fontSize: 9 }]}>{titulo}</Text>
+      <NiifTableHeader />
+      {seccion.lineas.length === 0 ? (
+        <Text style={[styles.notaText, { padding: 4 }]}>
+          Sin partidas para este rubro.
+        </Text>
+      ) : (
+        seccion.lineas.map((l, i) => (
+          <NiifTableRow
+            key={i}
+            codigo={l.codigo}
+            nombre={l.nombre}
+            valor={l.saldo}
+            alt={i % 2 === 1}
+            indent={indent}
+          />
+        ))
+      )}
+      <NiifTableRow
+        nombre={`Total ${titulo}`}
+        valor={seccion.total}
+        bold
+      />
+    </View>
+  );
+
+  const doc = (
+    <Document title="Estado de Situación Financiera" author={empresa.razonSocial}>
+      <Page size="LETTER" style={styles.page}>
+        <Header
+          empresa={empresa}
+          titulo="Estado de Situación Financiera"
+          subtitulo={`Al ${fechaTexto} · (NIIF/IFRS)`}
+        />
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>ACTIVO</Text>
+          {renderSeccion("Efectivo y equivalentes", data.activo.efectivo, 1)}
+          {renderSeccion("Inversiones y clientes", data.activo.clientes, 1)}
+          {renderSeccion("Inventarios", data.activo.inventarios, 1)}
+          {renderSeccion("Activo corriente (otros)", data.activo.corriente, 1)}
+          {renderSeccion("Activo no corriente", data.activo.no_corriente, 1)}
+          <NiifTableRow
+            nombre="TOTAL ACTIVO"
+            valor={data.totalActivo}
+            bold
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>PASIVO</Text>
+          {renderSeccion("Pasivo corriente", data.pasivo.corriente, 1)}
+          {renderSeccion("Pasivo no corriente", data.pasivo.no_corriente, 1)}
+          <NiifTableRow
+            nombre="TOTAL PASIVO"
+            valor={data.pasivo.total}
+            bold
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>PATRIMONIO</Text>
+          <NiifTableHeader />
+          {data.patrimonio.lineas.length === 0 ? (
+            <Text style={[styles.notaText, { padding: 4 }]}>
+              Sin partidas de patrimonio.
+            </Text>
+          ) : (
+            data.patrimonio.lineas.map((l, i) => (
+              <NiifTableRow
+                key={i}
+                codigo={l.codigo}
+                nombre={l.nombre}
+                valor={l.saldo}
+                alt={i % 2 === 1}
+                indent={1}
+              />
+            ))
+          )}
+          <NiifTableRow
+            nombre="Utilidad del período"
+            valor={data.patrimonio.utilidadPeriodo}
+            indent={1}
+          />
+          <NiifTableRow
+            nombre="TOTAL PATRIMONIO"
+            valor={data.totalPasivoPatrimonio - data.pasivo.total}
+            bold
+          />
+          <NiifTableRow
+            nombre="TOTAL PASIVO + PATRIMONIO"
+            valor={data.totalPasivoPatrimonio}
+            bold
+          />
+          <NiifTableRow
+            nombre="DIFERENCIA (Activo − Pasivo+Patrimonio)"
+            valor={data.diferencia}
+            bold
+            color={Math.abs(data.diferencia) < 1 ? COLORS.primary : COLORS.danger}
+          />
+        </View>
+
+        <NotasYFirma />
+        <Footer />
+      </Page>
+    </Document>
+  );
+  return await renderToBuffer(doc);
+}
+
+// ============================================================
+// 15. PDF ESTADO DE RESULTADO INTEGRAL (EER)
+// ============================================================
+
+export async function generarPDFEER(
+  empresaId: string,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<Buffer> {
+  const empresa = await cargarEmpresa(empresaId);
+  if (!empresa) throw new Error("Empresa no encontrada");
+  const data = await generarEER(empresaId, fechaInicio, fechaFin);
+
+  const renderLista = (
+    titulo: string,
+    lineas: SaldoLine[],
+    total: number,
+  ) => (
+    <View key={titulo} style={{ marginTop: 4 }}>
+      <Text style={[styles.sectionTitle, { fontSize: 9 }]}>{titulo}</Text>
+      <NiifTableHeader />
+      {lineas.length === 0 ? (
+        <Text style={[styles.notaText, { padding: 4 }]}>
+          Sin partidas para este rubro.
+        </Text>
+      ) : (
+        lineas.map((l, i) => (
+          <NiifTableRow
+            key={i}
+            codigo={l.codigo}
+            nombre={l.nombre}
+            valor={l.saldo}
+            alt={i % 2 === 1}
+            indent={1}
+          />
+        ))
+      )}
+      <NiifTableRow nombre={`Total ${titulo}`} valor={total} bold />
+    </View>
+  );
+
+  const doc = (
+    <Document title="Estado de Resultado Integral" author={empresa.razonSocial}>
+      <Page size="LETTER" style={styles.page}>
+        <Header
+          empresa={empresa}
+          titulo="Estado de Resultado Integral"
+          subtitulo={`Del ${fmtFecha(data.fechaInicio)} al ${fmtFecha(data.fechaFin)} · (NIIF/IFRS)`}
+        />
+
+        <View style={styles.section}>
+          {renderLista("Ingresos", data.ingresos, data.totalIngresos)}
+          {renderLista("Costos de venta", data.costosVenta, data.totalCostosVenta)}
+          <NiifTableRow
+            nombre="UTILIDAD BRUTA"
+            valor={data.utilidadBruta}
+            bold
+            color={data.utilidadBruta >= 0 ? COLORS.primary : COLORS.danger}
+          />
+          {renderLista("Gastos administrativos", data.gastosAdmin, data.totalGastosAdmin)}
+          {renderLista("Costos de producción", data.costosProduccion, data.totalCostosProduccion)}
+          <NiifTableRow
+            nombre="UTILIDAD OPERATIVA"
+            valor={data.utilidadOperativa}
+            bold
+            color={data.utilidadOperativa >= 0 ? COLORS.primary : COLORS.danger}
+          />
+          {renderLista("Otros ingresos", data.otrosIngresos, data.totalOtrosIngresos)}
+          {renderLista("Otros gastos", data.otrosGastos, data.totalOtrosGastos)}
+          <NiifTableRow
+            nombre="UTILIDAD ANTES DE IMPUESTOS"
+            valor={data.utilidadAntesImpuestos}
+            bold
+            color={data.utilidadAntesImpuestos >= 0 ? COLORS.primary : COLORS.danger}
+          />
+          <NiifTableRow
+            nombre="Impuesto de renta (33%)"
+            valor={data.impuestoRenta}
+            bold
+            color={COLORS.danger}
+          />
+          <NiifTableRow
+            nombre="UTILIDAD NETA DEL PERÍODO"
+            valor={data.utilidadNeta}
+            bold
+            color={data.utilidadNeta >= 0 ? COLORS.primary : COLORS.danger}
+          />
+        </View>
+
+        <NotasYFirma />
+        <Footer />
+      </Page>
+    </Document>
+  );
+  return await renderToBuffer(doc);
+}
+
+// ============================================================
+// 16. PDF ESTADO DE CAMBIOS EN EL PATRIMONIO (ECP)
+// ============================================================
+
+export async function generarPDFECP(
+  empresaId: string,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<Buffer> {
+  const empresa = await cargarEmpresa(empresaId);
+  if (!empresa) throw new Error("Empresa no encontrada");
+  const data = await generarECP(empresaId, fechaInicio, fechaFin);
+
+  const doc = (
+    <Document title="Estado de Cambios en el Patrimonio" author={empresa.razonSocial}>
+      <Page size="LETTER" style={styles.page}>
+        <Header
+          empresa={empresa}
+          titulo="Estado de Cambios en el Patrimonio"
+          subtitulo={`Del ${fmtFecha(data.fechaInicio)} al ${fmtFecha(data.fechaFin)} · (NIIF/IFRS)`}
+        />
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>SALDO INICIAL</Text>
+          <NiifTableHeader />
+          <NiifTableRow
+            nombre="Saldo inicial del patrimonio"
+            valor={data.saldoInicialPatrimonio}
+            bold
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>AUMENTOS DE PATRIMONIO</Text>
+          <NiifTableHeader />
+          {data.aumentos.length === 0 ? (
+            <Text style={[styles.notaText, { padding: 4 }]}>
+              No se registran aumentos en el período.
+            </Text>
+          ) : (
+            data.aumentos.map((a, i) => (
+              <NiifTableRow
+                key={`a-${i}`}
+                codigo={a.categoria.slice(0, 3).toUpperCase()}
+                nombre={a.concepto}
+                valor={a.monto}
+                alt={i % 2 === 1}
+                indent={1}
+              />
+            ))
+          )}
+          <NiifTableRow
+            nombre="Utilidad neta del período"
+            valor={data.utilidadNetaPeriodo}
+            bold
+            color={data.utilidadNetaPeriodo >= 0 ? COLORS.primary : COLORS.danger}
+          />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>REDUCCIONES DE PATRIMONIO</Text>
+          <NiifTableHeader />
+          {data.reducciones.length === 0 ? (
+            <Text style={[styles.notaText, { padding: 4 }]}>
+              No se registran reducciones en el período.
+            </Text>
+          ) : (
+            data.reducciones.map((r, i) => (
+              <NiifTableRow
+                key={`r-${i}`}
+                codigo={r.categoria.slice(0, 3).toUpperCase()}
+                nombre={r.concepto}
+                valor={r.monto}
+                alt={i % 2 === 1}
+                indent={1}
+              />
+            ))
+          )}
+          {data.dividendos > 0 && (
+            <NiifTableRow
+              codigo="DIV"
+              nombre="Dividendos pagados"
+              valor={data.dividendos}
+              indent={1}
+              color={COLORS.danger}
+            />
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <NiifTableRow
+            nombre="SALDO FINAL DEL PATRIMONIO"
+            valor={data.saldoFinalPatrimonio}
+            bold
+            color={COLORS.primary}
+          />
+        </View>
+
+        <NotasYFirma />
+        <Footer />
+      </Page>
+    </Document>
+  );
+  return await renderToBuffer(doc);
+}
+
+// ============================================================
+// 17. PDF ESTADO DE FLUJOS DE EFECTIVO (EFE)
+// ============================================================
+
+export async function generarPDFFE(
+  empresaId: string,
+  fechaInicio: string,
+  fechaFin: string,
+): Promise<Buffer> {
+  const empresa = await cargarEmpresa(empresaId);
+  if (!empresa) throw new Error("Empresa no encontrada");
+  const data = await generarEFE(empresaId, fechaInicio, fechaFin);
+
+  const renderFlujos = (
+    titulo: string,
+    flujos: { concepto: string; monto: number }[],
+    total: number,
+  ) => (
+    <View key={titulo} style={{ marginTop: 4 }}>
+      <Text style={[styles.sectionTitle, { fontSize: 9 }]}>{titulo}</Text>
+      <NiifTableHeader />
+      {flujos.length === 0 ? (
+        <Text style={[styles.notaText, { padding: 4 }]}>
+          Sin flujos para esta sección.
+        </Text>
+      ) : (
+        flujos.map((f, i) => (
+          <NiifTableRow
+            key={i}
+            codigo="—"
+            nombre={f.concepto}
+            valor={f.monto}
+            alt={i % 2 === 1}
+            indent={1}
+          />
+        ))
+      )}
+      <NiifTableRow nombre={`Total ${titulo}`} valor={total} bold />
+    </View>
+  );
+
+  const doc = (
+    <Document title="Estado de Flujos de Efectivo" author={empresa.razonSocial}>
+      <Page size="LETTER" style={styles.page}>
+        <Header
+          empresa={empresa}
+          titulo="Estado de Flujos de Efectivo"
+          subtitulo={`Del ${fmtFecha(data.fechaInicio)} al ${fmtFecha(data.fechaFin)} · Método indirecto · (NIIF/IFRS)`}
+        />
+
+        <View style={styles.section}>
+          {renderFlujos(
+            "Flujos de efectivo de actividades de operación",
+            data.flujosOperacion,
+            data.totalOperacion,
+          )}
+          {renderFlujos(
+            "Flujos de efectivo de actividades de inversión",
+            data.flujosInversion,
+            data.totalInversion,
+          )}
+          {renderFlujos(
+            "Flujos de efectivo de actividades de financiación",
+            data.flujosFinanciacion,
+            data.totalFinanciacion,
+          )}
+          <NiifTableRow
+            nombre="AUMENTO NETO DEL EFECTIVO"
+            valor={data.aumentoNetoEfectivo}
+            bold
+            color={COLORS.primary}
+          />
+          <NiifTableRow
+            nombre="Saldo inicial de efectivo"
+            valor={data.saldoInicial}
+            indent={1}
+          />
+          <NiifTableRow
+            nombre="SALDO FINAL DE EFECTIVO"
+            valor={data.saldoFinal}
+            bold
+            color={COLORS.primary}
+          />
+        </View>
+
+        <NotasYFirma />
+        <Footer />
+      </Page>
+    </Document>
+  );
+  return await renderToBuffer(doc);
+}
