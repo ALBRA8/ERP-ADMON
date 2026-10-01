@@ -1,0 +1,719 @@
+// ============================================================
+// MARSELLA ERP — Prisma Schema
+// Núcleo contable-administrativo inspirado en SG Hermes 9.2.1.1,
+// rediseñado sobre Next.js 16 + TypeScript + SQLite (intercambiable
+// a PostgreSQL cambiando el provider). Multi-tenant por Empresa,
+// audit-hardened, con FK formales (deuda técnica de Hermes resuelta).
+// Mapeo Hermes → Marsella documentado en docs/MIGRATION_FROM_HERMES.md
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Multi-tenancy: Empresa ----------
+
+model Empresa {
+  id                 String   @id @default(cuid())
+  nit                String   @unique // 900.123.456-7
+  razonSocial        String
+  nombreComercial    String?
+  direccion          String?
+  telefono           String?
+  ciudad             String?
+  email              String?
+  website            String?
+  representanteLegal String?
+  regimenTributario  String   @default("comun") // simple | comun | gran_contribuyente
+  responsabilidad    String   @default("iva") // iva | no_responsable
+  logo               String? // URL/base64
+  moneda             String   @default("COP")
+  decimales          Int      @default(2)
+  redondeo           String   @default("half_up") // half_up | half_even | down
+  zonaHoraria        String   @default("America/Bogota")
+  // PUC maestro
+  planCuentas        String   @default("Colombia_PUC")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  resolucionDian        ResolucionDian[]
+  terceros              Tercero[]
+  productos             Producto[]
+  servicios             Servicio[]
+  bodegas               Bodega[]
+  unidadesMedida        UnidadMedida[]
+  lineas                LineaClasificacion[]
+  listasPrecio          ListaPrecio[]
+  impuestos             Impuesto[]
+  centrosCosto          CentroCosto[]
+  cuentasPuc            CuentaPuc[]
+  comprobantes          Comprobante[] // asientos contables
+  movimientosCont       MovimientoContable[]
+  facturasVenta         FacturaVenta[]
+  facturasCompra        FacturaCompra[]
+  recibosCaja           ReciboCaja[]
+  comprobantesEgreso    ComprobanteEgreso[]
+  notas                 Nota[]
+  usuarios              Usuario[]
+  parametros            Parametro[]
+  tiposDocumento        TipoDocumento[]
+  ciudades              Ciudad[]
+  actividadesEconomicas ActividadEconomica[]
+}
+
+// ---------- Seguridad / RBAC (Hermes §5.1 mejorado) ----------
+
+model Usuario {
+  id            String    @id @default(cuid())
+  empresaId     String
+  empresa       Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  email         String    @unique
+  nombre        String
+  passwordHash  String // bcryptjs
+  rol           String    @default("vendedor") // admin | contador | cajero | vendedor | bodeguero
+  activo        Boolean   @default(true)
+  telefono      String?
+  cargo         String?
+  ultimoLogin   DateTime?
+  resetToken    String?
+  resetTokenExp DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([empresaId])
+}
+
+model Parametro {
+  id          String   @id @default(cuid())
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  clave       String
+  valor       String // JSON scalar
+  descripcion String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([empresaId, clave])
+  @@index([empresaId])
+}
+
+// ---------- Catálogos maestros (Hermes §5.2) ----------
+
+model Ciudad {
+  id           String    @id @default(cuid())
+  empresaId    String
+  empresa      Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigoDane   String    @unique
+  nombre       String
+  departamento String
+  createdAt    DateTime  @default(now())
+  terceros     Tercero[]
+
+  @@index([empresaId])
+}
+
+model ActividadEconomica {
+  id          String    @id @default(cuid())
+  empresaId   String
+  empresa     Empresa   @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigoCIIU  String
+  descripcion String
+  tarifaICA   Float     @default(0) // por mil
+  createdAt   DateTime  @default(now())
+  terceros    Tercero[]
+
+  @@unique([empresaId, codigoCIIU])
+}
+
+model TipoDocumento {
+  id                   String         @id @default(cuid())
+  empresaId            String
+  empresa              Empresa        @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo               String // FAC | FPOS | COM | RC | CE | NDV | NCV | NDC | NCC
+  nombre               String // Factura de Venta, Factura POS, Compra...
+  naturaleza           String // debito | credito (para tercero y contable)
+  afectaCartera        String         @default("none") // cxc | cxp | none
+  afectaInventario     String         @default("none") // entrada | salida | none
+  afectaContabilidad   Boolean        @default(true)
+  consecutivoSiguiente Int            @default(1)
+  createdAt            DateTime       @default(now())
+  facturaVentas        FacturaVenta[]
+
+  @@unique([empresaId, codigo])
+}
+
+// Resolución DIAN (Hermes §5.3) — soporta facturación electrónica
+model ResolucionDian {
+  id                   String   @id @default(cuid())
+  empresaId            String
+  empresa              Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numeroResolucion     String
+  fechaResolucion      DateTime
+  fechaInicioVigencia  DateTime
+  fechaFinVigencia     DateTime
+  prefijo              String // FEL, FPOS, FEST
+  rangoinicio          Int
+  rangoFin             Int
+  rangoinicioActual    Int
+  rangoFinActual       Int
+  consecutivoSiguiente Int      @default(1) // # próximo
+  tipoOperacion        String   @default("estandar") // estandar | pos | exportacion | no_dian
+  ambiente             String   @default("produccion") // pruebas | produccion
+  activa               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+
+  @@index([empresaId, activa])
+}
+
+model Impuesto {
+  id               String     @id @default(cuid())
+  empresaId        String
+  empresa          Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo           String // 01 | 04 | 06 | 07 (DIAN)
+  nombre           String // IVA 19% | IVA 5% | Excento | Impoconsumo
+  tipo             String // iva | impoconsumo | retefuente | reteica | reteiva
+  tarifa           Float // 19, 5, 0, 2.5, etc
+  cuentaContableId String?
+  activo           Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  productos        Producto[]
+
+  @@unique([empresaId, codigo])
+}
+
+model CentroCosto {
+  id        String   @id @default(cuid())
+  empresaId String
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo    String
+  nombre    String
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([empresaId, codigo])
+}
+
+model UnidadMedida {
+  id        String     @id @default(cuid())
+  empresaId String
+  empresa   Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo    String     @unique // UND, KG, LT, MTR, CJA
+  nombre    String
+  factor    Float      @default(1) // para conversions
+  createdAt DateTime   @default(now())
+  productos Producto[]
+
+  @@index([empresaId])
+}
+
+// Clasificación 6 niveles (Hermes §5.2 - linea1..linea6 colapsado a árbol)
+model LineaClasificacion {
+  id        String               @id @default(cuid())
+  empresaId String
+  empresa   Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    LineaClasificacion?  @relation("LineaTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  LineaClasificacion[] @relation("LineaTree")
+  nivel     Int // 1..6
+  codigo    String
+  nombre    String
+  createdAt DateTime             @default(now())
+  productos Producto[]
+
+  @@unique([empresaId, codigo, nivel])
+  @@index([empresaId, parentId])
+}
+
+model ListaPrecio {
+  id              String           @id @default(cuid())
+  empresaId       String
+  empresa         Empresa          @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  nombre          String // Mayorista, Detal, VIP
+  margen          Float            @default(0) // % sobre costo
+  activa          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  precioProductos PrecioProducto[]
+
+  @@index([empresaId])
+}
+
+// ---------- Terceros (Hermes §5.2) ----------
+
+model Tercero {
+  id                   String              @id @default(cuid())
+  empresaId            String
+  empresa              Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  tipo                 String // cliente | proveedor | empleado | socio | todos
+  tipoDocumento        String              @default("CC") // CC | NIT | CE | TI | PT
+  numeroDocumento      String
+  digitoVerif          String?
+  nombre               String // razón social o nombre completo
+  apellido1            String?
+  apellido2            String?
+  nombreComercial      String?
+  direccion            String?
+  telefono             String?
+  email                String?
+  ciudadId             String?
+  ciudad               Ciudad?             @relation(fields: [ciudadId], references: [id])
+  departamento         String?
+  pais                 String              @default("CO")
+  regimenTributario    String              @default("comun")
+  responsabilidad      String              @default("iva")
+  actividadEconomicaId String?
+  actividadEconomica   ActividadEconomica? @relation(fields: [actividadEconomicaId], references: [id])
+  // Crédito
+  cupoCredito          Float               @default(0)
+  saldoCartera         Float               @default(0) // actualizado por triggers de factura/recibo
+  diasPlazo            Int                 @default(0)
+  // Empleado
+  cargo                String?
+  salario              Float?
+  fechaIngreso         DateTime?
+  epsId                String?
+  arl                  String?
+  afpId                String?
+  // Auditoría
+  activo               Boolean             @default(true)
+  observaciones        String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  // Relaciones
+  facturasVenta      FacturaVenta[]
+  facturasCompra     FacturaCompra[]
+  recibosCaja        ReciboCaja[]
+  comprobantesEgreso ComprobanteEgreso[]
+  notas              Nota[]
+  movimientosCont    MovimientoContable[]
+
+  @@unique([empresaId, tipoDocumento, numeroDocumento])
+  @@index([empresaId, tipo])
+  @@index([empresaId, numeroDocumento])
+}
+
+// ---------- Productos / Inventario (Hermes §5.2 + §5.6) ----------
+
+model Producto {
+  id             String              @id @default(cuid())
+  empresaId      String
+  empresa        Empresa             @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo         String // SKU interno
+  codigoBarras   String?
+  nombre         String
+  descripcion    String?
+  tipo           String              @default("producto") // producto | servicio | kit | insumo
+  inventariable  Boolean             @default(true)
+  unidadMedidaId String?
+  unidadMedida   UnidadMedida?       @relation(fields: [unidadMedidaId], references: [id])
+  lineaId        String?
+  linea          LineaClasificacion? @relation(fields: [lineaId], references: [id])
+  // Costos y precios
+  costoPromedio  Float               @default(0)
+  ultimoCosto    Float               @default(0)
+  precio1        Float               @default(0) // precio base
+  precio2        Float               @default(0)
+  precio3        Float               @default(0)
+  // Impuestos
+  impuestoId     String?
+  impuesto       Impuesto?           @relation(fields: [impuestoId], references: [id])
+  tarifaIva      Float               @default(19) // snapshot
+  // Inventario
+  stockMinimo    Float               @default(0)
+  stockMaximo    Float               @default(0)
+  manejaLotes    Boolean             @default(false)
+  manejaSeriales Boolean             @default(false)
+  activo         Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  detallesVenta    DetalleFacturaVenta[]
+  detallesCompra   DetalleFacturaCompra[]
+  movimientosInv   MovimientoInventario[]
+  saldosInventario SaldoInventario[]
+  preciosPorLista  PrecioProducto[]
+  loteInventarios  LoteInventario[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId, codigoBarras])
+}
+
+model Servicio {
+  id          String   @id @default(cuid())
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo      String
+  nombre      String
+  descripcion String?
+  precio      Float    @default(0)
+  tarifaIva   Float    @default(19)
+  duracion    Int? // minutos
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([empresaId, codigo])
+}
+
+model PrecioProducto {
+  id            String      @id @default(cuid())
+  productoId    String
+  producto      Producto    @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  listaPrecioId String
+  listaPrecio   ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
+  precio        Float
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([productoId, listaPrecioId])
+}
+
+// ---------- Bodegas e Inventario ----------
+
+model Bodega {
+  id            String   @id @default(cuid())
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo        String
+  nombre        String
+  direccion     String?
+  responsableId String?
+  activa        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  saldosInventario SaldoInventario[]
+  movimientosInv   MovimientoInventario[]
+
+  @@unique([empresaId, codigo])
+}
+
+// Saldo consolidado por bodega + producto
+model SaldoInventario {
+  id            String   @id @default(cuid())
+  empresaId     String
+  productoId    String
+  producto      Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  bodegaId      String
+  bodega        Bodega   @relation(fields: [bodegaId], references: [id], onDelete: Cascade)
+  cantidad      Float    @default(0)
+  costoTotal    Float    @default(0)
+  costoPromedio Float    @default(0) // = costoTotal / cantidad
+  stockMinimo   Float    @default(0)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([productoId, bodegaId])
+  @@index([bodegaId])
+}
+
+// Lotes y seriales (Hermes §5.6)
+model LoteInventario {
+  id               String    @id @default(cuid())
+  empresaId        String
+  productoId       String
+  producto         Producto  @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  bodegaId         String
+  codigoLote       String
+  fechaFabricacion DateTime?
+  fechaVencimiento DateTime?
+  cantidad         Float     @default(0)
+  createdAt        DateTime  @default(now())
+
+  @@unique([empresaId, productoId, codigoLote])
+}
+
+// Kardex (movimientos de inventario valorizados)
+model MovimientoInventario {
+  id            String   @id @default(cuid())
+  empresaId     String
+  productoId    String
+  producto      Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  bodegaId      String
+  bodega        Bodega   @relation(fields: [bodegaId], references: [id])
+  tipo          String // entrada | salida | traslado | ajuste
+  cantidad      Float // + entrada, - salida
+  costoUnitario Float
+  costoTotal    Float
+  documentoTipo String? // FAC_VENTA, COMPRA, AJUSTE...
+  documentoId   String?
+  loteId        String?
+  fecha         DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([productoId, bodegaId, fecha])
+  @@index([empresaId, fecha])
+}
+
+// ---------- Facturación de Venta (Hermes §5.3 mejorado) ----------
+
+model FacturaVenta {
+  id               String                @id @default(cuid())
+  empresaId        String
+  empresa          Empresa               @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  tipoDocumentoId  String?
+  tipoDocumento    TipoDocumento?        @relation(fields: [tipoDocumentoId], references: [id])
+  numero           String // FEL-12345 (prefijo + consecutivo)
+  consecutivoDIAN  Int?
+  prefijo          String?
+  // Datos del cliente (snapshot)
+  terceroId        String?
+  tercero          Tercero?              @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  nombreCliente    String
+  nitCliente       String
+  // Fechas
+  fecha            DateTime              @default(now())
+  fechaVencimiento DateTime?
+  // Items
+  detalles         DetalleFacturaVenta[]
+  // Totales
+  subtotalBruto    Float                 @default(0) // antes de descuentos
+  descuentoTotal   Float                 @default(0)
+  subtotalNeto     Float                 @default(0) // subtotal - descuento
+  totalIva         Float                 @default(0)
+  totalImpoconsumo Float                 @default(0)
+  totalReteFuente  Float                 @default(0)
+  totalReteICA     Float                 @default(0)
+  totalReteIva     Float                 @default(0)
+  total            Float                 @default(0)
+  // DIAN
+  cufe             String? // Código Único de Factura Electrónica (mock inicial)
+  qrCode           String? // URL de representación DIAN
+  xmlUBL           String? // UBL 2.1 string
+  estadoDIAN       String                @default("borrador") // borrador | procesado | aceptado | rechazado
+  // POS / forma de pago
+  esPOS            Boolean               @default(false)
+  cajeroId         String?
+  formaPago        String? // efectivo | tarjeta | transferencia | credito | mixto
+  efectivoRecibido Float?
+  cambio           Float?
+  // Cartera
+  saldoPendiente   Float                 @default(0) // si formaPago=credito
+  estadoCartera    String                @default("pagada") // pagada | parcial | pendiente | vencida
+  // Estado
+  estado           String                @default("vigente") // vigente | anulada
+  observaciones    String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+  @@index([empresaId, terceroId])
+}
+
+model DetalleFacturaVenta {
+  id                  String       @id @default(cuid())
+  facturaId           String
+  factura             FacturaVenta @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  productoId          String?
+  producto            Producto?    @relation(fields: [productoId], references: [id])
+  descripcion         String
+  cantidad            Float
+  unidadMedida        String       @default("UND")
+  precioUnitario      Float
+  descuentoPorcentaje Float        @default(0)
+  descuentoValor      Float        @default(0)
+  subtotal            Float
+  tarifaIva           Float        @default(19)
+  iva                 Float        @default(0)
+  impoconsumo         Float        @default(0)
+  total               Float
+  costoUnitario       Float        @default(0) // para utilidad
+  bodegaId            String?
+  loteId              String?
+
+  @@index([facturaId])
+}
+
+// ---------- Compras y Proveedores (Hermes §5.4) ----------
+
+model FacturaCompra {
+  id                     String                 @id @default(cuid())
+  empresaId              String
+  empresa                Empresa                @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numero                 String // interno
+  proveedorFacturaNumero String? // número del proveedor
+  terceroId              String?
+  tercero                Tercero?               @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  nombreProveedor        String
+  nitProveedor           String
+  fecha                  DateTime               @default(now())
+  fechaVencimiento       DateTime?
+  detalles               DetalleFacturaCompra[]
+  subtotal               Float                  @default(0)
+  descuentoTotal         Float                  @default(0)
+  totalIva               Float                  @default(0) // IVA descontable
+  totalImpoconsumo       Float                  @default(0)
+  totalRetenciones       Float                  @default(0)
+  total                  Float                  @default(0)
+  saldoPendiente         Float                  @default(0)
+  estadoCartera          String                 @default("pendiente")
+  bodegaDestinoId        String?
+  estado                 String                 @default("vigente") // vigente | anulada
+  observaciones          String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model DetalleFacturaCompra {
+  id              String        @id @default(cuid())
+  facturaId       String
+  factura         FacturaCompra @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  productoId      String?
+  producto        Producto?     @relation(fields: [productoId], references: [id])
+  descripcion     String
+  cantidad        Float
+  unidadMedida    String        @default("UND")
+  precioUnitario  Float
+  descuentoValor  Float         @default(0)
+  subtotal        Float
+  tarifaIva       Float         @default(19)
+  iva             Float         @default(0)
+  total           Float
+  bodegaDestinoId String?
+
+  @@index([facturaId])
+}
+
+// ---------- Cartera CXC / CXP (Hermes §5.9) ----------
+
+model ReciboCaja {
+  // Recibo de Caja / Comprobante de Ingreso (recaudo de cartera)
+  id                 String   @id @default(cuid())
+  empresaId          String
+  empresa            Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numero             String
+  terceroId          String?
+  tercero            Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  nombreTercero      String
+  fecha              DateTime @default(now())
+  valorTotal         Float
+  concepto           String?
+  formaPago          String // efectivo | tarjeta | transferencia | cheque
+  bancoId            String?
+  observaciones      String?
+  aplicacionFacturas String? // JSON [{facturaId, valor}]
+  estado             String   @default("vigente")
+  createdAt          DateTime @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model ComprobanteEgreso {
+  // Pago a proveedores y gastos
+  id                String   @id @default(cuid())
+  empresaId         String
+  empresa           Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numero            String
+  terceroId         String?
+  tercero           Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  nombreTercero     String
+  fecha             DateTime @default(now())
+  valorTotal        Float
+  concepto          String?
+  formaPago         String // efectivo | transferencia | cheque
+  bancoId           String?
+  observaciones     String?
+  aplicacionCompras String? // JSON [{facturaId, valor}]
+  estado            String   @default("vigente")
+  createdAt         DateTime @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model Nota {
+  // Notas débito y crédito (Hermes §5.9)
+  id                String   @id @default(cuid())
+  empresaId         String
+  empresa           Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numero            String
+  tipo              String // debito | credito
+  afecta            String // venta | compra
+  facturaOrigenId   String?
+  facturaOrigenTipo String? // Venta | Compra
+  terceroId         String?
+  tercero           Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  fecha             DateTime @default(now())
+  valorTotal        Float
+  concepto          String?
+  estado            String   @default("vigente")
+  createdAt         DateTime @default(now())
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+// ---------- Contabilidad (Hermes §5.12) ----------
+
+model CuentaPuc {
+  id                  String               @id @default(cuid())
+  empresaId           String
+  empresa             Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  codigo              String               @unique // 1105, 2205, 4175...
+  nombre              String
+  nivel               Int // 1 (clase) - 6 (auxiliar)
+  naturaleza          String // debito | credito
+  esAjustable         Boolean              @default(false) // para ajustes NIIF
+  esMovimiento        Boolean              @default(true) // admite asientos
+  saldoActual         Float                @default(0) // actualizado por comprobantes
+  cuentaPadreId       String?
+  cuentaPadre         CuentaPuc?           @relation("CuentaPucTree", fields: [cuentaPadreId], references: [id])
+  subcuentas          CuentaPuc[]          @relation("CuentaPucTree")
+  createdAt           DateTime             @default(now())
+  movimientoContables MovimientoContable[]
+
+  @@index([empresaId, codigo])
+  @@index([cuentaPadreId])
+}
+
+model Comprobante {
+  // Asiento contable (cabecera + movimientos)
+  id                  String   @id @default(cuid())
+  empresaId           String
+  empresa             Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  numero              String // CG-2026-0001
+  tipo                String // manual | facturacion | compra | nomina | cierre | ajuste | tesoreria
+  fecha               DateTime @default(now())
+  descripcion         String?
+  totalDebito         Float    @default(0)
+  totalCredito        Float    @default(0)
+  diferencia          Float    @default(0) // debe ser 0 si está cuadrado
+  estado              String   @default("borrador") // borrador | contabilizado | anulado
+  documentoOrigenId   String?
+  documentoOrigenTipo String?
+  centroCostoId       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  movimientos MovimientoContable[]
+
+  @@unique([empresaId, numero])
+  @@index([empresaId, fecha])
+}
+
+model MovimientoContable {
+  id            String      @id @default(cuid())
+  empresaId     String
+  empresa       Empresa     @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  comprobanteId String
+  comprobante   Comprobante @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+  cuentaId      String
+  cuenta        CuentaPuc   @relation(fields: [cuentaId], references: [id])
+  terceroId     String?
+  tercero       Tercero?    @relation(fields: [terceroId], references: [id], onDelete: SetNull)
+  centroCostoId String?
+  descripcion   String?
+  debito        Float       @default(0)
+  credito       Float       @default(0)
+  fecha         DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@index([comprobanteId])
+  @@index([empresaId, cuentaId, fecha])
+  @@index([empresaId, terceroId, fecha])
+}
