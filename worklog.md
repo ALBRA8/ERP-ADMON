@@ -1438,3 +1438,171 @@ Stage Summary:
   - El `detalleServicioTecnico`-style state-machine del Taller se replicó aquí para Producción (borrador → en_proceso → finalizada, con anulación desde borrador/en_proceso). No se permite anular finalizada.
   - El helper `DialogNuevaOrden` envuelve `FormNuevaOrden` dentro de un `Dialog` — cuando el usuario hace clic en "Nueva orden" desde el tab Órdenes, se abre el modal con el form completo. El form se reutiliza también inline en el tab "Nueva orden".
 - `bun run lint` **EXIT 0**. Sin test code. `dev.log` final limpio: `✓ Compiled` exitoso, sin errores de runtime ni compilación en archivos nuevos.
+
+---
+Task ID: AUDIT-SEGURIDAD
+Agent: general-purpose (auditor de seguridad)
+Task: Auditoría crítica de seguridad del ERP Marsella
+
+Work Log:
+1. Leí `worklog.md` previo (16 tareas previas — contexto amplio desde ERP-Contabilidad-UI hasta ERP-PRODUCCION-COSTOS). Aprendí que el stack es Next.js 16 + TypeScript + Prisma 6 + SQLite, con 150 endpoints bajo `/api/`, multi-tenant SaaS con PlanSuscripcion/AuditoriaMultiTenant/middleware tenant.
+2. Ejecuté `bun audit` → **99 vulnerabilidades** (3 críticas, 55 altas, 36 moderadas, 5 bajas). Destacan 2 RCE no autenticadas en Next.js 16.1.1 (GHSA-p293-qw3h-jr36 Windows RCE, GHSA-2xp9-vwfh-vxw4 Image Optimization AVIF RCE) y 1 bypass de homoglifos en next-auth 4.24.11 (GHSA-7rqj-j65f-68wh).
+3. Mapeé los 150 archivos `route.ts`: solo 7 no invocan `getSession()` o `requireAuth()` (auth/demo, auth/login, auth/logout, auth/register, dian/cron, mcp/route, route.ts root). Verifiqué que los 7 son endpoints esperados (auth mutación, cron con header X-Cron-Secret, MCP con Bearer token, root healthcheck).
+4. Verifiqué RBAC: de 150 endpoints, **solo 3 usan `hasPermission()`** (resolucion-dian, empresas PUT, medios-magneticos/generar) y **3 más usan `session.rol !== "admin"` directo** (usuarios POST, empresa/plan PUT, mcp/server-info). Los 144 restantes solo validan autenticación → CUALQUIER usuario autenticado (cajero, vendedor, bodeguero) puede crear asientos contables, subir P12 DIAN, crear conexiones MCP externas, etc.
+5. Verifiqué que NO hay rate limiting en `src/` ni en `package.json` (no `rate-limiter-flexible`, no `upstash/ratelimit`). Brute force en `/api/auth/login` factible.
+6. Verifiqué que NO hay middleware (`src/middleware.ts` no existe). No hay CSRF protection, no hay rate limit, no hay headers de seguridad globales.
+7. Verifiqué `next.config.ts` (12 líneas): solo `output: "standalone"`, `typescript.ignoreBuildErrors: true`, `reactStrictMode: false`. Sin `headers()`, sin CSP, sin HSTS.
+8. Verifiqué `.env` (50 bytes): solo `DATABASE_URL=file:/home/z/my-project/db/custom.db`. NO existen `APP_SECRET`, `APP_ENCRYPTION_KEY`, `MCP_API_TOKEN`, `CRON_SECRET`, `MCP_EMPRESA_ID` configurados → todos los defaults inseguros del código están activos en runtime.
+9. Verifiqué `src/lib/auth.ts`: `APP_SECRET` default = `"marsella-erp-dev-secret-change-me-in-production-min-32-chars"` (literal hardcodeado, 50 chars). JWT HS256 con TTL 12h, sin revocación server-side, logout solo borra cookie.
+10. Verifiqué `src/lib/crypto.ts`: `APP_ENCRYPTION_KEY` default = `"00...00"` (64 ceros hex = AES-256 key todo ceros). Implementación AES-256-GCM estructuralmente correcta (IV 12 bytes, AuthTag 16, formato `iv+tag+ciphertext`), pero la clave default es trivialmente descifrable.
+11. Verifiqué `/api/auth/demo/route.ts` (65 líneas): crea empresa demo + usuario `demo@marsella.com / demo1234` con `rol: "admin"`, emite JWT, setea cookie. **NO hay guard `NODE_ENV !== "production"`**. Endpoint activo en cualquier ambiente.
+12. Verifiqué `/api/empresa/plan/route.ts:52-133`: solo valida `session.rol !== "admin"`, no `superadmin`. Combinado con `registerUser` que asigna `rol: "admin"` automáticamente a quien crea empresa → **cualquiera puede self-upgradear a plan Enterprise** con límites arbitrarios.
+13. Verifiqué `/api/mcp/route.ts:35-68`: el flujo de auth permite token fijo `MCP_API_TOKEN` O JWT de sesión. Si `MCP_API_TOKEN=""` (default), el primer branch se omite por falsy. `/api/mcp/server-info/route.ts:74` expone `process.env.MCP_API_TOKEN` a cualquier admin (incluido admin demo).
+14. Verifiqué `/api/mcp/conexiones/route.ts` (CRUD): cualquier usuario autenticado puede crear conexión a URL externa arbitraria → SSRF. `/api/mcp/conexiones/[id]/call-tool/route.ts` invoca HTTP saliente desde servidor del ERP → sondeo de red interna, IMDS AWS.
+15. Verifiqué `/api/dian/cron/route.ts:13-17`: usa `secret !== expected` con `!==` (no timing-safe). Default `CRON_SECRET=undefined` → bloqueo denegado por always-fail (no explotable pero disfuncional).
+16. Verifiqué `/api/dian/config/route.ts:54-111` (PUT P12): no valida MIME type, no valida tamaño máximo, no valida extensión del archivo. Carga el P12 completo en RAM con `Buffer.from(await file.arrayBuffer())` antes de validar.
+17. Verifiqué `/api/import/parse/route.ts:20-32`: similar — upload de Excel sin límite de tamaño, valida extensión pero no magic bytes. Combinado con ReDoS en `minimatch` (transitivo vía `exceljs` → `archiver`) → DoS.
+18. Verifiqué `public/sw.js` (493 líneas): el handler `fetch` cachea respuestas GET `/api/*` exitosas en `caches.open("marsella-api-v1")` sin excluir rutas sensibles (`/api/auth/me`, `/api/usuarios`, `/api/mcp/conexiones`, `/api/empresa/auditoria`, `/api/terceros` con NITs, `/api/dian/envios` con CUFEs). Tras logout, cache persiste → fuga de datos en POS compartido.
+19. Verifiqué `src/lib/indexeddb.ts`: store `pending-invoices` almacena `payload` completo de factura (items con productoId/cantidad/precio, terceroId=NIT cliente, total) SIN cifrar en IndexedDB. Accesible vía DevTools en kiosco POS.
+20. Verifiqué ausencia de `eval()`, `new Function()`, `dangerouslySetInnerHTML` con datos de usuario. Solo `src/components/ui/chart.tsx:83` usa `dangerouslySetInnerHTML` con `THEMES` hardcoded (no user-controlled) → benigno.
+21. Verifiqué ausencia de `$queryRaw`/`$executeRawUnsafe` en `src/`. Todas las búsquedas `contains` usan Prisma parameter binding → **no SQL injection**.
+22. Verifiqué que todos los endpoints por-ID (facturas/[id], dian/envios/[id], conciliacion/[id], mcp/conexiones/[id]/..., etc.) filtran `findFirst({ where: { id, empresaId: session.empresaId } })` → **no IDOR cross-tenant por ID adivinable**.
+23. Verifiqué `z.any()` y `z.record(z.string(), z.any())` en `niif/reportes/route.ts:92`, `niif/guardar/route.ts:15`, `import-schemas.ts:59` → schemas permisivos, sin límite de tamaño en json_data.
+24. Verifiqué `auditAction()` se invoca en solo 3 endpoints (empresa/plan, medios-magneticos/generar, medios-magneticos/[id]). Login, register, logout, dian config PUT, facturas POST/anular, contabilidad POST, mcp conexiones CRUD, reportes export → NO se auditan.
+25. Verifiqué que `.env*` está en `.gitignore:30-31` → secretos reales no se commitearían por accidente. PERO no existe `.env.example` para guiar a operadores.
+26. Creé el reporte completo en `/home/z/my-project/audit/seguridad.md` (~14KB, 26 hallazgos con CVSS, PoCs reproducibles, fixes técnicos precisos).
+
+Stage Summary:
+- **26 hallazgos**: 6 CRÍTICOS, 8 ALTOS, 7 MEDIOS, 5 BAJOS.
+- **Score global**: 38/100 (Deficiente).
+- **Veredicto**: NO debe exponerse a Internet. Múltiples vulnerabilidades críticas explotables hoy (defaults de secretos, endpoint demo expuesto, RCE en Next.js 16.1.1, RBAC ausente en 144/150 endpoints, escalada de plan SaaS, CSRF + sameSite=lax).
+- **Cadena de explotación trivial**: `/api/auth/demo` (cookie admin demo) → `/api/mcp/server-info` (exfiltra MCP_API_TOKEN) → `/api/mcp` con token (acceso MCP a datos de empresa aleatoria si MCP_EMPRESA_ID no seteado).
+- **Positivos**: Prisma parameter binding (no SQLi), filtrado empresaId en 100% endpoints por-ID (no IDOR), AES-256-GCM estructuralmente correcto, cookies httpOnly+secure, Zod en 95% de POST/PUT, no `eval`/`new Function`/`dangerouslySetInnerHTML` con user data, `.env*` en `.gitignore`.
+- **Esfuerzo remediació**: 20-25 días-ingeniero para cerrar CRÍTICOS+ALTOS. Sprint 1 (semana 1, 3 días) cierra los 3 CRÍTICOS más urgentes (H-CRIT-001, H-CRIT-002, H-CRIT-005) + headers HTTP + rate limit.
+- **Recomendación**: NO desplegar a producción pública sin cerrar H-CRIT-001, H-CRIT-002, H-CRIT-005 primero. Para despliegues con datos financieros reales (certificados DIAN de clientes), ejecutar plan completo + re-auditoría tras remediar.
+
+---
+Task ID: AUDIT-ARQUITECTURA
+Agent: general-purpose (auditor de arquitectura)
+Task: Auditoría crítica de arquitectura y código del ERP Marsella
+
+Work Log:
+1. Leí `worklog.md` completo (1.440 líneas, 17 secciones de tareas previas: ERP-Contabilidad-UI hasta ERP-PRODUCCION-COSTOS) para entender el contexto evolutivo del proyecto desde Fase 1 hasta Fase 5.
+2. Inventario de estructura: `package.json` (Next.js 16 + React 19 + Prisma 6 + SQLite + TanStack Query declarado pero no usado), `prisma/schema.prisma` (1.784 líneas, 81 modelos), `src/` (77.008 LOC en 263 archivos TS/TSX, 150 route.ts en `src/app/api`, 84 componentes TSX en `src/components`), `eslint.config.mjs` (20+ reglas en `off`), `tsconfig.json` (`noImplicitAny: false`, `strict: true`), `next.config.ts` (`typescript.ignoreBuildErrors: true`, `reactStrictMode: false`).
+3. Audit de Prisma schema completo: 81 modelos, 193 campos `Float`, **0 campos `Decimal`**, 50 onDelete Cascade, 8 onDelete SetNull, **19 relaciones sin onDelete explícito**, 88 `@@index`, 41 `@@unique`. Inconsistencias detectadas: `rangoinicio` vs `rangoFin` (typo camelCase), `json_data` snake_case en `ReporteNIIF`, soft delete con 4 estrategias mezcladas (`activo` booleano, `estado: "vigente|anulada"`, `estado` multi-valor, sin soft delete en tablas de movimiento).
+4. Audit de 15+ route.ts representativos: `facturas/route.ts` (482 líneas), `nomina/route.ts` (484), `contabilidad/route.ts` (220), `terceros/route.ts` (137), `creditos/route.ts` (137), `facturas/[id]/route.ts` (107), `creditos/[id]/pagar-cuota/route.ts` (123), `auth/login/route.ts`, `auth/demo/route.ts`, `inventario/route.ts`, `produccion/ordenes/route.ts`. Hallazgo crítico: patrón universal `getSession() + if (!session) return unauthorized()` manual en 143 archivos; `withAuth` y `parseBody` de `lib/api.ts` son código muerto (0 usos).
+5. Búsqueda sistémica con grep/ripgrep: `grep -rl "withAuth\|parseBody" src/app/api` → 0 resultados (código muerto confirmado); `grep $transaction src/app/api` → 8 archivos (5% de endpoints transaccionales); `grep -rl "hasPermission"` → 3 endpoints (2% con RBAC); `grep -rl "requireTenantAccess"` → 5 archivos (3% con validación de tenant); `grep ": any\b|as any\b|as unknown as" src` → 463 ocurrencias en 131 archivos; `grep "TODO|FIXME|HACK|XXX" src` → 1 ocurrencia (casi ningún comentario de deuda técnica); `grep "useQuery|useMutation" src` → 0 usos de TanStack Query; `grep "await fetch(" src/components` → 150 llamadas directas; `grep "useEffect" src/components` → 137 efectos; `grep "console.log|warn|error" src` → 25 en 21 archivos.
+6. Audit de componentes UI: identifiqué 15 archivos `.tsx` superando 1.500 líneas (`produccion-view.tsx` 2.711, `restaurante-view.tsx` 2.153, `servicios-view.tsx` 2.010, `facturacion-view.tsx` 1.971, etc.), 26 archivos >1.000 líneas (31% del total), 30 archivos >500 líneas. `facturacion-view.tsx:221-225` tiene `_keyCounter` module-level mutable; `:532-544` doble `useEffect` que causa doble fetch en mount.
+7. Audit de `src/app/page.tsx` (199 líneas): SPA monolítico con `useState<View>` y cascade `{view === "..." && <XView/>}` para 30+ vistas eagerly importadas. No hay `middleware.ts`, no hay `error.tsx`/`loading.tsx`/`not-found.tsx`, no hay `Suspense`, no hay `next/dynamic`, no hay `"use server"`. Verifiqué ausencia con find/grep.
+8. Audit de `lib/api.ts`, `lib/auth.ts`, `lib/db.ts`, `lib/inventario.ts`, `lib/tenant.ts`, `lib/currency.ts`. Hallazgos: `APP_SECRET` con fallback hardcodeado en `auth.ts:11-13`; `serverError(message, error)` en `api.ts:28-31` filtra el error crudo al cliente JSON; `registrarMovimientoInventario` en `inventario.ts:21-122` sin transacción con race condition TOCTOU sobre `SaldoInventario`; `currency.ts:3` comenta falsamente "tipo decimal exacto usando cents" pero usa `number` (Float64); `bustPrismaClientCacheAndReload` en `db.ts:90-117` hack con `require.cache` en proyecto ESM.
+9. Audit de tests: `tests/` sólo contiene shell scripts para runtime setup (no tests de código). `package.json` no tiene script `"test"`. 0 dependencias de `vitest`, `jest`, `playwright`, `cypress`. Las coincidencias con estos nombres están en `repo-crm-albra/` (vendored). **Cobertura de tests: 0%**.
+10. Audit de docs y observabilidad: README bien estructurado pero afirmaciones engañosas ("5 roles RBAC" no aplicado, "swap a PostgreSQL en una línea" inviable sin migraciones, "tipo decimal exacto usando cents" falso en currency.ts). No hay OpenAPI/Swagger. No hay logger estructurado (pino/winston). No hay error tracking (Sentry/Bugsnag/Datadog). No hay `prisma/migrations/` folder — se usa `prisma db push --accept-data-loss` (destructivo). `.env` con `DATABASE_URL=file:/home/z/my-project/db/custom.db` (ruta absoluta no portable).
+11. Audit de PWA: `public/sw.js` (494 líneas) con NetworkFirst para `/api/*` + CacheFirst para estáticos + IndexedDB para facturas offline. `manifest.json` con `start_url: "/?view=facturas&mode=pos"` que no funciona porque `page.tsx` no lee query params.
+12. Audit de N+1 y performance: identifiqué 15 route.ts con `for (const ...)` loops conteniendo `db.findUnique` (N+1 potencial). `facturas/route.ts:128-144` confirmado: `db.producto.findUnique` por cada item de factura. `contabilidad/route.ts:42-92` (op=balance) carga TODOS los movimientos a memoria y suma en JS en lugar de `groupBy`. Paginación ausente en sub-endpoints (`?op=balance|mayor|auxiliar`).
+13. Generé el reporte de auditoría en `/home/z/my-project/audit/arquitectura.md` (carpeta nueva) con 32 hallazgos (9 CRÍTICOS, 11 ALTOS, 8 MEDIOS, 4 BAJOS), tabla de métricas objetivas, lista de puntos fuertes (15) y conclusiones críticas con plan de remediación por sprints. NO implementé fixes (rol auditor: solo auditar y reportar). NO toqué código fuente (sólo lectura).
+
+Stage Summary:
+- **32 hallazgos totales**: 9 CRÍTICOS, 11 ALTOS, 8 MEDIOS, 4 BAJOS.
+- **Score global**: 38/100. **Veredicto: NO APTO PARA PRODUCCIÓN**.
+- **Deuda técnica estimada**: 12–18 semanas-hombre para alcanzar nivel producción (sin contar migración Float→Decimal con backfill).
+- **Hallazgos CRÍTICOS**: (1) Ausencia transaccional en facturación/contabilidad/nómina — `db.$transaction` sólo en 8/150 endpoints; (2) 193 campos `Float` y 0 `Decimal` en schema — tipo equivocado para dinero; (3) `/api/auth/demo` crea admin sin autenticación ni env guard; (4) `APP_SECRET` JWT con fallback hardcodeado público; (5) RBAC declarado con 5 roles pero `hasPermission` sólo se invoca en 3 endpoints — 146 endpoints no validan permisos; (6) wrappers `withAuth` y `parseBody` en `lib/api.ts` son código muerto (0 usos); (7) `terceros/route.ts` PUT/DELETE sin Zod ni validación de tenant — cross-tenant mutation; (8) `next.config.ts` con `typescript.ignoreBuildErrors: true` + `tsconfig.noImplicitAny: false`; (9) `prisma db push --accept-data-loss` sin `prisma/migrations/` — destructivo en producción.
+- **Hallazgos ALTOS destacados**: ESLint con 20+ reglas en `off`; SPA monolítico en `page.tsx` con 30+ imports eager; 0 usos TanStack Query + 150 `await fetch` directos; 15 componentes >1500 líneas (`produccion-view.tsx` 2711 es el peor); race conditions en `comprobante.count + 1` para numeración; `serverError` filtra stack traces al cliente; 463 `any`/`as any` en 131 archivos; 0 logger estructurado; `useEffect` mal usado; 0 tests automatizados; `registrarMovimientoInventario` con TOCTOU race.
+- **Puntos fuertes (15)**: cobertura funcional de 30+ módulos verticales (DIAN real, NIIF, nómina electrónica, Radian, MCP); `empresaId` en todos los modelos + 88 índices; JWT httpOnly + AES-256-GCM para credenciales DIAN; PWA con SW + IndexedDB; Promise.all para queries paralelas; Zod en POSTs; `CuentaPuc` self-relation para árbol PUC; `Comprobante+MovimientoContable` patrón contable estándar; `cuid()` IDs; endpoints state-machine consistentes; worklog 1.440 líneas extremadamente detallado.
+- **Recomendación de remediación por sprints**: Sprint 1 (semanas 1-2) eliminar endpoint demo, forzar APP_SECRET, aplicar RBAC en endpoints críticos, validar tenant en PUT/DELETE, reactivar strict+ignoreBuildErrors. Sprint 2 (3-5) transacciones, migración Float→Decimal, tests para lib/ contable. Sprint 3 (6-8) inicializar migraciones Prisma, reactivar ESLint, migrar a App Router. Sprint 4 (9-12) refactor de monolitos, TanStack Query, eliminar `any`, Zod más estricto.
+- **Mensaje final al usuario**: el ERP tiene alcance funcional impresionante pero defectos estructurales (Float en dinero, ausencia transaccional, RBAC no aplicado, 0 tests, `ignoreBuildErrors: true`) lo hacen inutilizable en producción contable real. La velocidad de entrega actual (17 módulos en 17 tareas) es activa pero insostenible sin abordar los CRÍTICOS. NO añadir más módulos verticales antes de corregir fundamentos.
+- Archivo generado: `/home/z/my-project/audit/arquitectura.md` (~17KB, formato markdown estándar con secciones de Resumen, CRÍTICOS, ALTOS, MEDIOS, BAJOS, métricas, puntos fuertes y conclusiones). No se editó código fuente (rol auditor: sólo lectura + reporte). Worklog actualizado con esta sección.
+
+---
+Task ID: AUDIT-DATOS-NEGOCIO
+Agent: general-purpose (auditor de datos y lógica de negocio)
+Task: Auditoría crítica de datos y lógica contable/fiscal del ERP Marsella
+
+Work Log:
+1. Inicialicé el entorno y leí `worklog.md` (1.440+ líneas, 17 tareas previas) prestando especial atención a las secciones `ERP-DIAN-REAL` (257-317), `ERP-NOMINA` (318-386), `ERP-NIIF` (847-922), `ERP-NIIF-FIX` (1165-1355) y `ERP-RADIAN` (1104-1164).
+2. Listé el árbol del proyecto: 81 modelos Prisma en `prisma/schema.prisma` (1.784 líneas), 23 librerías de cálculo en `src/lib/` (14.846 LOC), ~25 módulos API en `src/app/api/`.
+3. **Audité el modelo de datos** (`prisma/schema.prisma`): leí todos los 81 modelos (Empresa, Usuario, Parametro, Ciudad, ActividadEconomica, TipoDocumento, ResolucionDian, Impuesto, CentroCosto, UnidadMedida, LineaClasificacion, ListaPrecio, Tercero, Producto, Servicio, PrecioProducto, Bodega, SaldoInventario, LoteInventario, MovimientoInventario, FacturaVenta, DetalleFacturaVenta, FacturaCompra, DetalleFacturaCompra, ReciboCaja, ComprobanteEgreso, Nota, CuentaPuc, Comprobante, MovimientoContable, MCPConexion, MCPLog, NominaConcepto, Nomina, DetalleNomina, RetencionFuenteTabla, ConfiguracionDIAN, DIANEnvio, Banco, CuentaBancaria, MovimientoBancario, ExtractoBancario, ExtractoMovimiento, ConciliacionBancaria, CajaPOS, ArqueoCaja, SolicitudCredito, Credito, CuotaCredito, RubroPresupuestal, CDP, CRP, ModificacionPresupuestal, Mesa, Comanda, DetalleComanda, Habitacion, ReservaHotel, Finca, CompraCafe, ControlCalidadCafe, PruebaTaza, UsuarioServicio, BloqueFacturacion, LecturaMedidor, TarifaServicio, OrdenServicioTecnico, DetalleServicioTecnico, Vehiculo, Mascota, MedioMagnetico, MedioMagneticoDetalle, ReporteNIIF, CuentaNIIF, PlanSuscripcion, AuditoriaMultiTenant, OrdenProduccion, DetalleOrdenProduccion, RecetaProducto, RecetaIngrediente, EventoRadian). Verifiqué campos `empresaId` con FK a `Empresa` y `onDelete: Cascade` en ~80% de tablas operativas.
+4. **Audité facturación electrónica DIAN** (`src/lib/dian.ts` 227 líneas, `src/lib/dian-real.ts` 939 líneas, `src/lib/radian.ts` 849 líneas):
+   - **CUFE**: verifiqué algoritmo SHA-384 (`crypto.ts:71` usa `createHash("sha384")` aunque la función se llama `sha256`). Orden de campos en `dian.ts:27-42` coincide con anexo Resolución DIAN 165. **Hallazgo**: `tipAdq` hardcoded a "1" en `facturas/route.ts:183` (CRIT-010).
+   - **DV NIT**: encontré bug crítico en `dian.ts:201` — factores `[71, 67, 59, 59, 53, 47, 43, 41, 37, 29]` con un `59` duplicado en posición 3-4 y `23` final ausente (CRIT-001). Lo verifiqué numéricamente con Python: NIT 890900115 (Ecopetrol DV=1) → código calcula 9, oficial calcula 1 ✓ con `[71, 67, 59, 53, 47, 43, 41, 37, 29, 23]`.
+   - **XML UBL 2.1**: namespaces correctos (`urn:oasis:names:specification:ubl:schema:xsd:Invoice-2`). Hallazgo: `receptor.tipoDocumento` hardcoded a "31" en `facturas/route.ts:222` (MED-003).
+   - **Firma XAdES-EPES**: `dian-real.ts:166-256` usa `rsa-sha256`, `c14n`, dos referencias (documento + SignedProperties), namespaces XAdES 1.3.2 correctos. Sin hallazgos críticos.
+   - **Eventos Radian**: `radian.ts:172-216` genera `ApplicationResponse` con namespace `urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2` correcto, 7 tipos (030-036) soportados, CUFE del evento con SHA-384 y sufijo `"E"`. Sin hallazgos críticos.
+5. **Audité cálculos contables** (`src/lib/currency.ts` 99 líneas, `src/lib/inventario.ts` 159 líneas, `src/app/api/facturas/route.ts` 482 líneas, `src/app/api/compras/route.ts` 178 líneas, `src/app/api/cartera/route.ts` 118 líneas, `src/app/api/movimientos-bancarios/route.ts` 224 líneas):
+   - **Redondeo**: `round(value, decimals, method)` en `currency.ts:45-69` implementa `half_up`/`half_even`/`down`/`up` correctamente (Estatuto Tributario y PUC usan half_up).
+   - **Costo promedio**: `inventario.ts:60-77` fórmula `nuevoCostoPromedio = (saldo.cantidad * saldo.costoPromedio + entrada.cant * entrada.costo) / nuevaCantidad` correcta para PEPS promedio ponderado.
+   - **Asiento de venta**: `facturas/route.ts:374-482` genera correctamente débitos `130505` Clientes + `613595` Costo mercancías, créditos `240805` IVA + `413595` Ingresos + `150505` Inventario. ✅
+   - **Asiento de compra AUSENTE**: `compras/route.ts` POST completo (líneas 71-177) NO genera ningún `db.comprobante.create()` ni `db.movimientoContable.create()` (CRIT-003). Sólo actualiza `SaldoInventario` (tabla de inventario) pero no el `MovimientoContable` (tabla contable) → la contabilidad no refleja las compras.
+   - **Asiento de cartera AUSENTE**: `cartera/route.ts` POST (líneas 58-117) NO genera asientos contables ni aplica a facturas específicas (CRIT-004). Los campos `ReciboCaja.aplicacionFacturas` y `ComprobanteEgreso.aplicacionCompras` quedan null.
+   - **Aging**: `currency.ts:81-99` mezcla "no vencido" con "0-30 días vencido" (ALT-005).
+   - **Cierre contable**: búsqueda exhaustiva confirma que NO existe endpoint ni librería para cierre, sólo un prompt en `mcp-server.ts:1860-1927` (CRIT-008).
+6. **Audité nómina electrónica** (`src/lib/nomina.ts` 700 líneas, `src/app/api/nomina/route.ts` 483 líneas):
+   - **Constantes 2026**: SMMLV $1.423.500 ✅, UVT $51.379 ✅, Aux. Transporte $200.000 ⚠️ (probablemente desactualizado a 2025, ALT-006).
+   - **IBC**: tope 25 SMMLV correcto (`nomina.ts:193`).
+   - **EPS/Pensión empleado**: 4% del IBC correcto (`nomina.ts:200-219`).
+   - **ARL 5 clases**: 0.522% / 1.044% / 2.436% / 4.35% / 6.96% correctas (Decreto 1607/2013).
+   - **ICBF/SENA/Pensión patronal**: lógica de `Math.min(base, 10*SMMLV)` incorrecta — la exención Ley 1607 es binaria (CRIT-006).
+   - **EPS patronal AUSENTE**: `calcularAportesPatronales` no calcula el 8,5% patronal a salud (CRIT-005). Verificado: el seed `seed-marsella.ts` no incluye concepto `EPS_PATRONAL` y `generarAsientoNomina` (`nomina/route.ts:391-398`) no tiene rama para él.
+   - **Cesantías 8.33%**: correcto sobre devengado constitutivo (`nomina.ts:287`).
+   - **Intereses cesantías 1%**: aproximación lineal, sobre-provisiona en meses tempranos (BAJ-003).
+   - **Prima 8.33%**: correcto (`nomina.ts:291`).
+   - **Vacaciones 4.17%**: tasa correcta pero base incorrecta — usa `devengadoConstitutivo` (incluye HE/recargos) en lugar de `salarioPorDias` (CRIT-007).
+   - **CUNE**: `nomina.ts:510-526` SHA-384 con sufijo `'N'` correcto.
+   - **XML UBL Nómina**: `nomina.ts:562-679` namespace `urn:oasis:names:specification:ubl:schema:xsd:NominaDocument-2` correcto.
+   - **Retención en la fuente**: tabla 2026 con 7 rangos en UVT (95/150/360/640/945/2300) y descuento por dependientes (10% c/u hasta 10 máx, art. 387 E.T.) correctos.
+   - **Días laborados**: hardcoded a 15/30 sin calcular días reales (ALT-007).
+7. **Audité NIIF/EE.FF.** (`src/lib/niif.ts` 770 líneas, `src/lib/niif-mapping.ts` 475 líneas):
+   - **Tasa impuesto renta**: 33% (`niif.ts:35`) — incorrecto para 2026, debe ser 35% Ley 1819/2016 (CRIT-002).
+   - **ESF**: activo/pasivo/patrimonio con clasificación corriente/no corriente correcta. Mapeo de 1690/1695 Depreciación acumulada → `activo_no_corriente` (corregido en ERP-NIIF-FIX). Mapeo de 2505 Salarios por pagar → `pasivo_corriente` (corregido). ✅
+   - **EER**: `utilidadBruta = ingresos - costos_venta` ✅, `utilidadOperativa = utilidadBruta - gastosAdmin - costos_produccion` ✅.
+   - **ECP**: aumenta/reduce patrimonio correctamente.
+   - **EFE**: método indirecto corregido en ERP-NIIF-FIX (depreciación como ajuste no-caja, deltaPasivoNoCorriente como ajuste no-caja, flujosInversion sólo naturaleza débito). Coherencia `aumentoNetoEfectivo ≈ saldoFinal - saldoInicial` verificada.
+   - **Fallback por clase 1 → `activo_corriente`**: peligroso (MED-004).
+   - **Notas NIIF mencionan NIC 18 anacrónica** (BAJ-007).
+8. **Audité cartera/créditos** (`src/lib/credito.ts` 210 líneas):
+   - **Amortización French**: `credito.ts:58-98` PMT `P * [i*(1+i)^n] / [(1+i)^n - 1]` correcta.
+   - **Conversión EA→mensual**: `(1+EA)^(1/12) - 1` correcta (SuperFinanciera).
+   - **Alemán y Americano**: implementaciones correctas.
+9. **Audité inventario** (`src/lib/inventario.ts`):
+   - **Kardex valorizado**: saldo acumulado correcto (`inventario.ts:147-158`).
+   - **Salida**: mantiene costo promedio actual sin recálculo, correcto.
+   - **Lotes**: modelo `LoteInventario` (líneas 414-427) bien definido con `fechaVencimiento`.
+   - **Seriales**: campo `manejaSeriales` en `Producto` (línea 332) pero NO hay tabla de seriales individuales. **Falta implementar tabla `SerialInventario`**.
+   - **Conteo físico**: no existe endpoint ni modelo.
+   - **Traslados entre bodegas**: el tipo `traslado` está en `MovimientoInventario.tipo` pero NO se valida saldo negativo en bodega origen (no hay comprobación de stock antes del traslado).
+10. **Audité medios magnéticos DIAN** (`src/lib/medios-magneticos.ts` 829 líneas):
+    - **Formato 1007**: generador correcto en `medios-magneticos.ts:108-260`. Deriva retenciones de `aplicacionCompras` JSON (que nunca se puebla — ALT-011).
+    - **Formato 2276/2277/1647/2238**: implementados.
+    - **Archivo TXT**: `generarArchivoTXT` (líneas 612-670) genera estructura `H|nit|año|formato|razon|fechaGen` (header) + `D|...` (detalles) + `T|totalReg|totalPago|totalRetenido` (totales). El separador `|` es correcto per DIAN.
+11. **Audité conciliación bancaria** (`src/app/api/conciliacion/route.ts` 108 líneas, `src/app/api/conciliacion/[id]/route.ts`):
+    - El POST recibe saldos y ajustes ya calculados — NO hay matching automático libro vs extracto (MED-006).
+    - No hay generación automática de asientos de ajuste por diferencias de comisiones/intereses no registradas.
+12. **Audité multi-tenant y validaciones de negocio**:
+    - `empresaId` presente en 80%+ de tablas operativas (verificado en schema). Consultas API filtran consistentemente por `session.empresaId`. ✅
+    - Catálogos `Ciudad`, `UnidadMedida`, `ActividadEconomica` tienen `empresaId` — deberían ser tablas globales compartidas (MED-005).
+    - Sin validación de IVA descontable según responsabilidad del proveedor (ALT-001).
+    - Sin validación de cupo de crédito del cliente (ALT-002).
+    - Sin validación de fecha posterior al día actual en facturación (ALT-003, aunque facturas usa `new Date()`).
+    - Sin validación de monto máximo POS (Res. DIAN 165) (ALT-004).
+    - Sin validación de período cerrado (CRIT-008 relacionado).
+13. **Síntesis**: 28 hallazgos (10 CRÍTICOS + 11 ALTOS + 7 MEDIOS). Score global 42/100. Riesgo DIAN: ALTO.
+14. Generé el reporte completo en `/home/z/my-project/audit/datos-negocio.md` (~21KB, 28 hallazgos con ubicación/síntoma/causa raíz/impacto fiscal/fix recomendado/referencia normativa, tabla de verificación de valores 2026, puntos fuertes y conclusiones).
+15. No edité archivos de código fuente (rol auditor: sólo lectura + reporte). Creé el archivo `audit/datos-negocio.md` en carpeta nueva (regla explícita).
+
+Stage Summary:
+- **Reporte entregado**: `/home/z/my-project/audit/datos-negocio.md` (~21KB, 28 hallazgos auditados con referencias normativas PUC/DIAN/NIC/Estatuto Tributario).
+- **Hallazgos CRÍTICOS (10)**:
+  1. DV NIT con factores incorrectos (`dian.ts:201` — duplicate `59`, missing `23`).
+  2. Tasa impuesto renta 33% en lugar de 35% (`niif.ts:35` — Ley 1819/2016).
+  3. Asiento contable de COMPRAS ausente (`compras/route.ts` — no `db.comprobante.create()`).
+  4. Asiento contable de Recibos/Egresos ausente (`cartera/route.ts` — no `db.comprobante.create()`).
+  5. Aporte patronal a EPS (8,5% salud) no calculado (`nomina.ts:239-259`).
+  6. ICBF/SENA/Pensión patronal con lógica de tope incorrecta (`nomina.ts:243-258` — `Math.min(base, 10*SMMLV)` mal aplicado).
+  7. Vacaciones provisionadas sobre base incorrecta (`nomina.ts:295` — usa `devengadoConstitutivo` en lugar de `salarioPorDias`).
+  8. Cierre contable mensual/anual no implementado (sólo existe prompt en `mcp-server.ts`).
+  9. `resolucionVigente` no invocado al emitir factura (`facturas/route.ts:96-110`).
+  10. `tipAdq` hardcoded a "1" en CUFE (`facturas/route.ts:183`).
+- **Hallazgos ALTOS (11)**: validación de IVA descontable según responsabilidad del proveedor; validación de cupo de crédito; validación de fecha futura; validación de monto máximo POS; aging mezcla no-vencido con 0-30; Aux. Transporte 2026 posiblemente desactualizado ($200.000); `diasLaborados` hardcoded a 15/30 sin cálculo real; notas crédito/débito no implementadas (modelo existe pero no hay endpoints); Float en todos los campos monetarios; `saldoCartera` único para cliente+proveedor (semántica confusa); recibos/egresos no aplican a facturas específicas.
+- **Hallazgos MEDIOS (7)**: helper `sha256` con nombre engañoso (implementa SHA-384); URL QR DIAN con dominio mock falso; `tipoDocumento` receptor hardcoded a "31"; fallback NIIF "1"→`activo_corriente` peligroso; catálogos compartidos duplicados por empresa; conciliación bancaria sin matching automático; intereses cesantías con aproximación lineal.
+- **Hallazgos BAJOS (7)**: formato XML UBL quita ceros decimales; `fmtN` en nómina también quita ceros; intereses cesantías sobre-provisiona en meses tempranos; `calcularDigitoVerificacion` no valida input numérico; race condition en generación de `CG-YYYY-NNNNNN`; EE.RR. mezcla costos venta y producción en "utilidad operativa"; notas NIIF mencionan NIC 18 anacrónica.
+- **Puntos fuertes (14)**: arquitectura multi-tenant coherente; firma XAdES-EPES correcta; CUFE con SHA-384 y orden de campos correcto; CUNE con sufijo `'N'`; amortización French con conversión EA→mensual correcta; costo promedio ponderado correcto; provisiones con factor de proporcionalidad por días; mapeo PUC→NIIF por prefijo más largo; EFE método indirecto corregido; colas DIAN con backoff exponencial; cifrado AES-256-GCM para credenciales; tabla retención 2026 con 7 rangos; cuentas PUC con jerarquía y `esMovimiento`; multi-ambiente DIAN pruebas/producción.
+- **Veredicto**: el sistema NO es apto para uso en producción contable real en Colombia tal como está. Score 42/100. Deben resolverse al menos 6 de los 10 CRÍTICOS antes de cualquier despliegue contable real. Estimación: 3-5 días-hora de desarrollador + asesoría de contador. Archivo generado: `/home/z/my-project/audit/datos-negocio.md` (~21KB). No se editó código fuente.

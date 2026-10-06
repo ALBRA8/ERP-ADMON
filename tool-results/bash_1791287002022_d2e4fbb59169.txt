@@ -1,0 +1,222 @@
+---WORKLOG TAIL---
+   - Working capital changes (-Δ clientes, -Δ inventarios, +Δ pasivo_corriente) sin cambios — ya eran correctas.
+
+10. **Verificación de coherencia EFE**:
+    - ANTES del fix: `aumentoNetoEfectivo = -8.783.975`, `saldoFinal - saldoInicial = -5.076.000`, diff = -3.707.975 (NO coherente).
+    - DESPUÉS del fix: `aumentoNetoEfectivo = -5.076.000`, `saldoFinal - saldoInicial = -5.076.000` (sin contar comprobante IMP-10 desbalanceado), diff = 0 (COHERENTE). El diff real es -100.000 que es exactamente el D 1105 Caja 100K del IMP-10 sin contrapartida — data demo, no bug de cálculo.
+
+11. **Verificación funcional con curls autenticados** (cookie demo@marsella.com / demo1234):
+
+```bash
+# Login demo
+curl -c /tmp/cookies.txt -X POST http://localhost:3000/api/auth/demo
+# 200: {"empresa":{"id":"cmuos7clf0000m0jwp8vo4v8g","razonSocial":"Marsella S.A.S."}, ...}
+
+# ESF (Estado de Situación Financiera)
+curl -b /tmp/cookies.txt "http://localhost:3000/api/niif/esf?fechaFin=2026-12-31"
+# 200:
+#   activo.efectivo.total: -4.976.000  (Caja -1.7M + Bancos 1.8M + Bancos cta cte -5.076M)
+#   activo.clientes.total: 111.040
+#   activo.inventarios.total: -50.823,53  (Inventario general saldo negativo — la data vendió inventario no comprado)
+#   activo.total: -4.915.783,53
+#   pasivo.corriente.total: 4.902.133  ← AHORA incluye 250505 Salarios por pagar (2.538.000)
+#   pasivo.no_corriente.total: 1.446.237,5  ← AHORA incluye 262505 Vacaciones consolidadas (276.262,5)
+#   pasivo.total: 6.348.370,5
+#   patrimonio.utilidadPeriodo: -11.364.154,03
+#   totalPasivoPatrimonio: -5.015.783,53
+#   diferencia: 100.000  (= comprobante IMP-10 desbalanceado D 1105 100K sin crédito — DATA issue)
+
+# EER (Estado de Resultado Integral)
+curl -b /tmp/cookies.txt "http://localhost:3000/api/niif/eer?fechaInicio=2026-01-01&fechaFin=2026-12-31"
+# 200:
+#   totalIngresos: 108.000  (3 facturas: 90K + 1K + 17K)
+#   totalCostosVenta: 50.823,53  (2 facturas con costo de mercancías)
+#   totalGastosAdmin: 11.421.330,5  (2 nóminas con salarios+aux+aportes+provisiones)
+#   utilidadBruta: 57.176,47
+#   utilidadOperativa: -11.364.154,03
+#   utilidadAntesImpuestos: -11.364.154,03
+#   impuestoRenta: 0  (pérdida, no aplica)
+#   utilidadNeta: -11.364.154,03  (negativa: nómina 11.4M >> ingresos 108K — DATA demo, no bug)
+
+# EFE (Estado de Flujos de Efectivo)
+curl -b /tmp/cookies.txt "http://localhost:3000/api/niif/efe?fechaInicio=2026-01-01&fechaFin=2026-12-31"
+# 200:
+#   utilidadNeta: -11.364.154,03
+#   ajustesNoCaja:
+#     - "Aumento (disminución) de pasivos no corrientes y provisiones": +1.446.237,5
+#     (la depreciación NO aparece porque no hay movimientos en 1690/1695 con la data demo actual)
+#   flujosOperacion:
+#     - "Utilidad neta del período": -11.364.154,03
+#     - "Aumento (disminución) de pasivos no corrientes y provisiones": +1.446.237,5
+#     - "(Disminución) aumento de clientes / cuentas por cobrar": -111.040
+#     - "(Aumento) disminución de inventarios": +50.823,53
+#     - "Aumento (disminución) de pasivos corrientes": +4.902.133  (incluye 2505 Salarios 2.538.000)
+#   totalOperacion: -5.076.000  ← AHORA COHERENTE con el cambio real de efectivo
+#   aumentoNetoEfectivo: -5.076.000
+#   saldoInicial: 0
+#   saldoFinal: -4.976.000  (-100K vs aumentoNeto por IMP-10 desbalanceado)
+
+# ECP (Estado de Cambios en el Patrimonio) — verificación de no-regresión
+curl -b /tmp/cookies.txt "http://localhost:3000/api/niif/ecp?fechaInicio=2026-01-01&fechaFin=2026-12-31"
+# 200:
+#   saldoInicialPatrimonio: 0
+#   aumentos: []  (no hay movimientos en clase 3)
+#   reducciones: []
+#   utilidadNetaPeriodo: -11.364.154,03  (coincide con EER ✓)
+#   dividendos: 0
+#   saldoFinalPatrimonio: -11.364.154,03  (= inicial + utilidad - dividendos ✓)
+```
+
+12. **UI `src/components/niif/niif-view.tsx` sin cambios**: La estructura JSON de los 4 endpoints NIIF (esf/eer/ecp/efe) se mantiene idéntica — solo cambian los valores calculados y se agrega el ajuste no-caja "Aumento (disminución) de pasivos no corrientes y provisiones" en el array `ajustesNoCaja` (que se renderiza vía `renderFlujos` ya existente como parte de flujosOperacion). Verificado: el componente ya itera `data.flujosOperacion` y muestra cada `EFELinea` con concepto + monto. No requiere modificación.
+
+13. `bun run lint` **EXIT 0** (0 errores, 0 warnings) sobre los 2 archivos modificados (`src/lib/niif.ts` y `src/lib/niif-mapping.ts`). `dev.log` final limpio: `✓ Compiled` exitoso, los 4 endpoints NIIF responden 200, sin errores de runtime.
+
+Stage Summary:
+- **`src/lib/niif-mapping.ts`** (modificado, ~490 líneas): corregí 6 entradas en la tabla `PUC_TO_NIIF`:
+  - 2505 Salarios por pagar → `pasivo_corriente` (era `pasivo_no_corriente` — incorrecto per PUC colombiano)
+  - 2520 Prima de servicios por pagar → `pasivo_corriente` (era `pasivo_no_corriente`)
+  - 2525 Vacaciones por pagar → `pasivo_corriente` (era `pasivo_no_corriente`)
+  - 2625 Provisión vacaciones consolidadas → `pasivo_no_corriente` (no existía, caía a fallback `pasivo_corriente`)
+  - 1690 Depreciación acumulada → `activo_no_corriente` (no existía, caía a fallback `activo_corriente`)
+  - 1695 Depreciación acumulada inversiones → `activo_no_corriente` (no existía, caía a fallback)
+  - Comentarios explicativos actualizados en secciones 16, 25, 26.
+- **`src/lib/niif.ts`** (modificado, ~770 líneas): reescribí la sección de `ajustesNoCaja` y `flujosInversion` en `generarEFE` (líneas ~480-600):
+  - Eliminé `deltaActivoNoCorriente` de `ajustesNoCaja` (era doble conteo con `flujosInversion`).
+  - Agregué depreciación explícita: solo contra-activos naturaleza crédito en `activo_no_corriente` (saldo crédito-débito, suma como ajuste no-caja).
+  - Agregué `deltaPasivoNoCorriente` como ajuste no-caja (provisiones 26XX y pasivos laborales LP — gastos causados no pagados en efectivo).
+  - `flujosInversion` solo considera cuentas naturaleza débito (activos reales), no contra-activos.
+  - Cambié `monto: -Math.abs(inversiones)` por `monto: -inversiones` para permitir ventas como ingresos.
+  - Incluí clase 19 (Diferidos) en el filtro de inversión (faltaba).
+- **UI sin cambios** — la estructura JSON es idéntica, solo cambian los valores.
+- **No se tocó**: Prisma schema, endpoints API existentes, otros módulos.
+
+Bugs reales encontrados y corregidos:
+1. Mapeo PUC incorrecto de cuentas laborales (2505/2520/2525) — eran clasificadas como `pasivo_no_corriente` cuando son corrientes (se pagan dentro del año).
+2. Mapeo PUC con fallback incorrecto para 2625 Provisión vacaciones consolidadas — caía a `pasivo_corriente` por clase-2 fallback cuando debería ser `pasivo_no_corriente`.
+3. Mapeo PUC con fallback incorrecto para 1690/1695 Depreciación acumulada — caía a `activo_corriente` por clase-1 fallback cuando debería ser `activo_no_corriente` (contra-activo de P&E).
+4. EFE doble conteo: `deltaActivoNoCorriente` se sumaba en `ajustesNoCaja` Y las compras se restaban en `flujosInversion`.
+5. EFE faltante: `deltaPasivoNoCorriente` (provisiones 26XX) no se agregaba como ajuste no-caja, rompiendo la coherencia del método indirecto NIC 7. La utilidadNeta incluye el gasto 510525 Provisiones ($1.446.237,5) pero el efectivo NO se pagó — debe reversarse. Antes: aumentoNeto=-8.783.975 vs Δefectivo=-5.076.000 (diff -3.707.975 = exactamente Δ pasivo_no_corriente). Después: aumentoNeto=-5.076.000 = Δefectivo (coherente).
+6. EFE `flujosInversion` consideraba contra-activos (naturaleza crédito) como inversiones — la depreciación se reportaba como egreso de inversión (incorrecto — es ajuste no-caja).
+7. EFE `flujosInversion` usaba `Math.abs` — siempre reportaba como egreso, impidiendo registrar ventas de P&E como ingresos.
+
+Hallazgos relevantes sobre la hipótesis del usuario:
+- **La naturaleza de las cuentas SÍ se respeta correctamente** en `agruparSaldosPorCategoria`. La fórmula `pc.naturaleza === "credito" ? credito - debito : debito - credito` es correcta para PUC colombiano (ingresos clase 4 = crédito aumenta, costos clase 6 = débito aumenta, etc.).
+- **La utilidadNeta = -11.364.154 NO es un bug**: la data demo tiene nómina de $11.4M (3 empleados x 2 meses con salarios altos: $5.3M + $2.65M en salarios básicos) contra ingresos de $108K (3 facturas). La empresa pierde $11.4M legítimamente por data demo.
+- **El saldoFinal = -5.076.000 en EFE NO es un bug de cálculo**: la data demo paga nómina ($5.076.000) desde la cuenta bancaria 111005 que no tenía depósitos previos. El saldo bancario es legítimamente negativo.
+- **El comprobante IMP-10 desbalanceado** (D 1105 100K sin crédito) genera un desbalance de $100.000 que se refleja correctamente en el ESF como `diferencia: 100.000` y en el EFE como diff entre `aumentoNetoEfectivo` y el cambio real de efectivo. Es un problema de DATA (validación de comprobante cuadrado), no de cálculo NIIF.
+
+Limitaciones:
+- La data demo tiene un comprobante IMP-10 desbalanceado (D 1105 100K sin crédito). Esto fue permitido por algún endpoint de comprobantes (probablemente POST /api/contabilidad que valida cuadre pero permite excepciones, o un seeder). El ESF muestra diferencia 100.000 — correcto matemáticamente.
+- El EFE no desglosa explícitamente cada tipo de provisión (cesantías / intereses / prima / vacaciones) como líneas separadas — las agrupa en una sola línea "Aumento (disminución) de pasivos no corrientes y provisiones". Para mayor detalle se podría iterar `saldosPeriodo["pasivo_no_corriente"]` línea por línea.
+- El EFE no separa "préstamos LP recibidos" de "provisiones" dentro de `deltaPasivoNoCorriente`. Si existieran préstamos largo plazo (clase 21LP / 25LP / 28LP / 29LP), se incluirían en este ajuste no-caja, pero en realidad los préstamos SÍ generan efectivo (van en financiación). Para la data demo actual (sin préstamos LP), no hay problema. Para una versión futura, se podría filtrar por código PUC (21XX/28XX = préstamos → financiación, 26XX = provisiones → ajuste no-caja).
+- El EER no incluye el impuesto de renta diferido (NIC 12) — solo calcula impuesto corriente al 33% sobre utilidad antes de impuestos. Simplificación documentada en `generarNotasNIIF` política 6.
+- No se modificó la data demo (regla implícita "no tocar otros módulos"). El usuario podría reseedear la data con un escenario más simple (sin nómina) para validar el caso "1 factura + 1 compra" que menciona el enunciado.
+- `bun run lint` **EXIT 0**. Sin test code. No se tocó Prisma schema. No se tocaron endpoints API. No se tocaron otros módulos.
+
+---
+Task ID: ERP-PRODUCCION-COSTOS
+Agent: full-stack-developer
+Task: Implementar módulo de Costos y Órdenes de Producción (transformación) — Hermes §5.7.
+
+Work Log:
+1. Inicialicé el entorno fullstack con `init-fullstack_1775040338514.sh`. Dev server arrancado en :3000 (PID 30047). `EADDRINUSE` en segunda invocación → reiniciado manualmente con `bun run dev` después de `pkill` para asegurar disponibilidad de los endpoints de prueba.
+2. Leí `worklog.md` previo (15 tareas previas) y los registros de agentes previos en `/agent-ctx/` — especialmente `ERP-VERTICALES-RESTANTES` (patrones de API state-machine: `iniciar/finalizar/anular` con `findFirst({ where: { id, empresaId } })`, helpers `apiGet/apiPost`, layout `Sheet+Dialog+AlertDialog`, badges estado con Icon, acento emerald/teal, dark mode, sonner toasts).
+3. Revisé `prisma/schema.prisma` (líneas 1687–1757): confirmé que los modelos `OrdenProduccion`, `DetalleOrdenProduccion`, `RecetaProducto`, `RecetaIngrediente` ya existen con los campos requeridos por el spec. Revisé también `CuentaPuc`, `Comprobante`, `MovimientoContable` (líneas 656–722) para el asiento contable, y `SaldoInventario`, `MovimientoInventario`, `Bodega`, `Producto` (líneas 304–449) para los movimientos de inventario.
+4. Revisé librerías base: `src/lib/auth.ts` (`getSession()` retorna `SessionPayload` con `empresaId`), `src/lib/api.ts` (`ok/badRequest/unauthorized/notFound/serverError/getQuery/getQueryInt`, helpers estándar), `src/lib/currency.ts` (`round(value, decimals, method)`, default `half_up`), `src/lib/currency-fn.ts` (wrapper client para `formatCurrency`), `src/lib/inventario.ts` (`registrarMovimientoInventario(input)` que auto-maneja signo de salida y recalcula saldo+costo promedio PEPS-ponderado), `src/lib/db.ts` (patrón `bustPrismaClientCacheAndReload` con `hasAllModels` checklist).
+5. Revisé endpoints existentes como referencia de patrones: `/api/taller/ordenes` (gen número `OST-2026-NNNNNN`, count+1), `/api/taller/ordenes/[id]/agregar-detalle` (recalcula totales por tipo), `/api/taller/ordenes/[id]/iniciar-reparacion` y `finalizar` y `anular` (state-machine simple), `/api/contabilidad` (POST asiento manual con validación de cuadre débitos=créditos, número `CG-2026-NNNNNN`).
+6. Verifiqué que el PrismaClient generado incluye los 4 modelos nuevos (`ordenProduccion`, `detalleOrdenProduccion`, `recetaProducto`, `recetaIngrediente`) — corriendo `bunx prisma generate` y probando con `bunx tsx -e` que `typeof p.ordenProduccion === 'object'`. Todos accesibles.
+7. **`src/lib/produccion.ts`** (~330 líneas) con 5 funciones exportadas + 1 helper adicional de reversión:
+   - `calcularCostoProduccion(orden)`: suma `costoMateriaPrima + costoManoObra + costoIndirectos` (con `round`), calcula `costoUnitario = costoTotal / cantidadProducida` si `cantidadProducida > 0` (sino 0). Devuelve los 5 campos recalculados sin mutar BD.
+   - `aplicarReceta(receta, cantidadProducir, bodegaId)`: para cada ingrediente calcula `cantidadRequerida = ing.cantidad * cantidadProducir`, consulta `db.saldoInventario.findUnique({ where: { productoId_bodegaId } })` para obtener stock actual, calcula `subtotal = cantidadRequerida * costoUnitario` y `disponible = stockActual >= cantidadRequerida`. Retorna `{ ingredientes: IngredienteAplicado[], totalCosto, todoDisponible }`.
+   - `registrarSalidaMateriasPrimas(ordenId, bodegaId)`: carga `DetalleOrdenProduccion` de tipo `materia_prima`, valida la bodega por empresa, es **idempotente** (verifica `movimientoInventario.findFirst({ where: { documentoTipo: "ORDEN_PRODUCCION", documentoId: orden.id, tipo: "salida" } })`), para cada detalle con `productoId` llama `registrarMovimientoInventario({ tipo: "salida", cantidad, costoUnitario, documentoTipo: "ORDEN_PRODUCCION", documentoId: orden.id })`. Acumula `totalCosto` con `round`.
+   - `registrarEntradaProductoTerminado(ordenId, bodegaId, cantidadProducida, costoUnitario)`: valida `orden.productoResultanteId` no nulo, idempotente con `documentoTipo: "ORDEN_PRODUCCION_ENTRADA"`, llama `registrarMovimientoInventario({ tipo: "entrada", cantidad: cantidadProducida, costoUnitario, ... })`.
+   - `generarAsientoProduccion(ordenId, empresaId)`: idempotente (si `orden.comprobanteContableId` ya existe, retorna el previo). Lookup cuentas PUC por `codigo` (150505, 2335, 7205) vía `db.cuentaPuc.findMany({ where: { empresaId, codigo: { in: [...] } } })` — lanza error descriptivo si faltan. Calcula `diferencia = costoTotal - (costoMateriaPrima + costoManoObra + costoIndirectos)` y la absorbe en el crédito a 7205 para que el comprobante cuadre exactamente. Genera número `CP-2026-NNNNNN` (count+1). Crea `Comprobante` con `tipo: "produccion"`, `estado: "contabilizado"`, `documentoOrigenId: orden.id`, `documentoOrigenTipo: "ORDEN_PRODUCCION"`. Crea 4 `MovimientoContable`: débito 150505 x costoTotal, crédito 150505 x costoMateriaPrima, crédito 2335 x costoManoObra, crédito 7205 x costoIndirectosAjustado. Actualiza `orden.comprobanteContableId`.
+   - `reversarSalidasMateriasPrimas(ordenId, bodegaId)` (extra): para anulación de orden en_proceso. Idempotente con `documentoTipo: "ORDEN_PRODUCCION_REVERSO"`. Para cada detalle `materia_prima` con `productoId`, registra `entrada` por `cantidad` y `costoUnitario` originales.
+8. **9 endpoints API** nuevos bajo `/api/produccion/`:
+   - `recetas/route.ts` (GET + POST + PUT): GET lista con `include: { ingredientes }` y lookup manual de productos (resultado + ingredientes). POST crea en transacción atómica receta + `createMany` de ingredientes. PUT reescribe receta y reemplaza ingredientes (deleteMany + createMany).
+   - `recetas/[id]/route.ts` (GET + PUT + DELETE): GET con `include ingredientes` + lookup productos. PUT self-contained con el mismo schema (no usa import dinámico). DELETE con cascade automático por schema Prisma.
+   - `recetas/[id]/calcular-costo/route.ts` (GET): recibe `?cantidad=N&bodegaId=B`, llama `aplicarReceta` si hay bodega, devuelve el detalle con `cantidadPorUnidad`, `cantidadRequerida`, `costoUnitario`, `subtotal`, `stockActual`, `disponible`, y los KPIs `totalCosto` + `costoUnitario` + `verificacionStock.todoDisponible`.
+   - `ordenes/route.ts` (GET + POST): GET con filtros `?estado&fechaInicio&fechaFin&q&page&pageSize`, `include: { detalles }` y lookup productos (resultante + detalles). POST con schema Zod: acepta `productoResultanteId?`, `cantidadProducir`, `recetaId?`, `observaciones?`, `detalles?: [{ tipo, productoId?, descripcion, cantidad, costoUnitario }]`. Si pasa `recetaId`, carga ingredientes como detalles `materia_prima` con `cantidad = ing.cantidad * cantidadProducir` y hereda `productoResultanteId` de la receta si no se especificó. Calcula costos por tipo (`costoMateriaPrima` / `costoManoObra` / `costoIndirectos`), `costoTotal` (vía `calcularCostoProduccion`), genera número `PROD-2026-NNNNNN`, estado inicial `borrador`. Crea en transacción atómica orden + `createMany` de detalles.
+   - `ordenes/[id]/route.ts` (GET): detalle con `include: { detalles: { orderBy: { createdAt: "asc" } } }`, lookup productos, lookup comprobante contable si existe (`comprobanteContableId`).
+   - `ordenes/[id]/agregar-detalle/route.ts` (POST): schema Zod `{ tipo, productoId?, descripcion, cantidad, costoUnitario }`. Valida estado no `finalizada`/`anulada`. Crea `DetalleOrdenProduccion` con `subtotal = cantidad * costoUnitario`. Recalcula `costoMateriaPrima`/`costoManoObra`/`costoIndirectos` (suma de subtotales filtrando por tipo), `costoTotal` y `costoUnitario` (vía `calcularCostoProduccion` con `cantidadProducida` actual).
+   - `ordenes/[id]/iniciar/route.ts` (POST): body `{ bodegaId }`. Valida estado `borrador` o `en_proceso`. Valida bodega por empresa. Verifica stock de cada detalle `materia_prima` contra `saldoInventario` — si falta alguno retorna 400 con `details.faltantes = [{ producto, requerido, disponible }]`. Llama `registrarSalidaMateriasPrimas`. Update estado `en_proceso`, `fechaInicio = new Date()`.
+   - `ordenes/[id]/finalizar/route.ts` (POST): body `{ cantidadProducida, bodegaId }`. Valida estado `en_proceso`. Recalcula `costoUnitario = costoTotal / cantidadProducida`. Llama `registrarEntradaProductoTerminado`. Update estado `finalizada`, `fechaFin = now()`, `cantidadProducida`, `costoUnitario`. Llama `generarAsientoProduccion`. Si el asiento falla (ej: falta cuenta PUC), no revierte la entrada pero reporta `asientoError` al cliente.
+   - `ordenes/[id]/anular/route.ts` (POST): body `{ bodegaId? }`. Valida estado no `finalizada` ni `anulada`. Si estado `en_proceso` requiere `bodegaId` y llama `reversarSalidasMateriasPrimas`. Update estado `anulada`.
+9. **`src/components/produccion/produccion-view.tsx`** (~2700 líneas, client component) con `export function ProduccionView()` y 4 tabs:
+   - **Órdenes**: Card con filtros `q` + `estado` (badge con Icon ClipboardList/PlayCircle/CheckCircle2/Ban, colores emerald/teal/rose/neutral según estado). Tabla con scroll vertical `max-h-[calc(100vh-280px)] overflow-auto` y sticky header. Columnas: número (mono emerald), fecha inicio, fecha fin, producto resultante, cantidad (cant. producir/producida en dos líneas), costo total, costo unitario, estado badge. Click fila → Sheet `SheetOrdenDetalle` con KPIs (3 cards MP/MO/CI + 3 cards Cant.Producir/Cant.Producida/CostoUnitario + banner Costo total), 3 secciones de detalles agrupadas por tipo (con subtotales), card de comprobante contable (si existe, con número CP-2026-NNNNNN, fecha, débitos, créditos), y botones de estado condicionales: `Iniciar` (borrador), `Finalizar` (en_proceso), `Anular` (borrador|en_proceso).
+   - **Nueva orden**: Card con `FormNuevaOrden` inline. Cabecera: producto resultante select (productos inventariables), cantidad a producir. Modo manual/receta (toggle). Si modo receta: select de recetas, hereda producto resultante y carga ingredientes como detalles `materia_prima` con `cantidad = ing.cantidad * cantidadProducir`. Tabla editable de detalles: tipo select (materia_prima|mano_obra|costo_indirecto), producto select (solo si materia_prima), descripción, cantidad, costo unitario, subtotal en vivo, botón quitar. Totales en vivo: 5 cards (MP/MO/CI/Total/Unitario). Sección "Verificar stock": select de bodega + botón que llama `calcular-costo` si hay receta, o consulta `op=saldos` y mapea manualmente si modo manual — muestra banner emerald/rose con icon CheckCircle2/AlertTriangle. Textarea observaciones. Botón "Crear orden" (POST `/api/produccion/ordenes`).
+   - **Recetas**: grid responsive `sm:grid-cols-2 lg:grid-cols-3` de cards (Beaker icon, badge Activa/Inactiva, descripción line-clamp-2, rendimiento, count ingredientes). Click card → `SheetReceta` con tabla de ingredientes + sección emerald "Calcular costo" (input cantidad + select bodega + botón + tabla resultado con req/disp/subt + 2 cards Costo total/Costo unitario + banner verde/rojo de verificación). Botón "Nueva receta" → `DialogReceta` (producto, nombre, descripción, rendimiento, switch activa, tabla editable ingredientes con producto/descripción/cantidad/costo/subtotal, costo total por unidad al pie).
+   - **Histórico**: Card con date pickers Desde/Hasta + botón Aplicar. KPIs en grid `grid-cols-2 md:grid-cols-4` (Total órdenes, Unidades producidas, Costo total producido ighlight emerald], Órdenes anuladas). Tabla con scroll vertical y sticky header: número, fecha fin, producto, cantidad producida, costo total, costo unitario, estado badge. Click fila abre el mismo Sheet detalle.
+10. Diálogos modales: `DialogNuevaOrden` (modal wrapper sobre FormNuevaOrden, reutiliza el mismo formulario), `DialogReceta` (CRUD receta), `Dialog` para Iniciar/Finalizar (con selects de bodega y KPIs informativos), `AlertDialog` para Anular (con bodega select condicional si estado en_proceso).
+11. **`src/components/layout/sidebar.tsx`**: añadí import `Factory` a `lucide-react`. Extendí `NavKey` con `"produccion"`. Añadí item `{ key: "produccion", label: "Producción y Costos", icon: Factory, group: "Operación" }` después de "Compras" en el grupo "Operación".
+12. **`src/app/page.tsx`**: importé `ProduccionView` de `@/components/produccion/produccion-view`. Añadí `"produccion"` al tipo `View`. Añadí caso `{view === "produccion" && <ProduccionView />}` después de `importaciones`.
+13. **`src/lib/db.ts`**: añadí 4 modelos nuevos (`ordenProduccion`, `detalleOrdenProduccion`, `recetaProducto`, `recetaIngrediente`) a la lista `required` de `hasAllModels` para auto-invalidar el cache de PrismaClient tras `prisma db push` (siguiendo el mismo patrón documentado por el agente VERTICALES-RESTANTES).
+14. Lint: 
+    - Primera pasada: 2 warnings en `produccion-view.tsx` — `Unused eslint-disable directive` en los 2 `useEffect` que cargan/recalculan ingredientes de receta.
+    - Fix: completé el array de deps con `recetas`, `cantidadProducir`, `productoResultanteId` (primer effect) y `modo`, `recetaId`, `recetas` (segundo effect), y removí los comentarios `// eslint-disable-next-line react-hooks/exhaustive-deps` (ya no eran necesarios).
+    - Segunda pasada: `bun run lint` **EXIT 0** — 0 errores, 0 warnings.
+15. Verificación funcional con curl autenticado (cookie `demo@marsella.com / demo1234`):
+    - `GET /api/produccion/recetas` → 200 `[]` (vacío inicial).
+    - `GET /api/produccion/ordenes?page=1&pageSize=10` → 200 `{"items":[],"total":0,"page":1,"pageSize":10}`.
+    - `POST /api/produccion/recetas` (producto + 1 ingrediente MP 2u x $1000) → 200, receta creada con `ingrediente.subtotal=2000` (=2*1000) ✓.
+    - `GET /api/produccion/recetas/[id]/calcular-costo?cantidad=10&bodegaId=BODEGA_PRIN` → 200, `cantidadRequerida=20`, `subtotal=20000`, `stockActual=0`, `disponible=false`, `totalCosto=20000`, `costoUnitario=2000`, `verificacionStock.todoDisponible=false` ✓.
+    - `POST /api/produccion/ordenes` (con receta, cantidadProducir=10) → 200 `numero=PROD-2026-000001`, `estado=borrador`, `productoResultanteId` heredado de la receta, `costoMateriaPrima=20000`, `costoTotal=20000`, detalle con `cantidad=20` (=2*10) ✓.
+    - `POST /api/produccion/ordenes/[id]/iniciar` (sin stock) → **400** `"Stock insuficiente para iniciar la orden. Faltan: P-IMP-001 - Producto Importado Uno (req 20, disp 0)"` con `details.faltantes` ✓.
+    - `POST /api/inventario` (entrada 50u x $1000) → 200 (saldo inicial).
+    - `POST /api/produccion/ordenes/[id]/iniciar` → 200 `estado=en_proceso`, `salidasRegistradas=1`, `totalSalida=20000` ✓. Saldo MP bajó de 50 a 30 (=50-20) ✓.
+    - `POST /api/produccion/ordenes/[id]/finalizar` (cantidadProducida=10, bodega) → 200 `estado=finalizada`, `cantidadProducida=10`, `costoUnitario=2000` (=20000/10) ✓. Entrada de producto terminado registrada: saldo del producto resultante = 10u @ $2000 = $20000 ✓.
+    - Como faltaba la cuenta PUC 2335 (no está en el seed), el asiento falló **gracefulmente**: `asientoContable=null`, `asientoError="No se encontraron las cuentas PUC con códigos: 2335. Cree las cuentas en Contabilidad → Plan de Cuentas antes de finalizar la orden."` ✓ (no revierte la entrada).
+    - Creé manualmente la cuenta 2335 vía `bunx tsx` directo a Prisma.
+    - `POST /api/produccion/ordenes` (orden 2, receta, cant=5) → 200 `PROD-2026-000002`.
+    - `POST iniciar` → 200 (salidas registradas, saldo MP bajó de 30 a 20).
+    - `POST finalizar` (cant=5) → 200 `estado=finalizada`, `costoUnitario=2000`, `asientoContable={comprobanteId, numero:"CP-2026-000011"}` ✓ (cuadrado: débitos=10000, créditos=10000).
+    - `GET /api/produccion/ordenes/[id]` → 200 con `comprobanteContableId` set y `comprobante.numero=CP-2026-000011`, `totalDebito=10000`, `totalCredito=10000`, `estado=contabilizado` ✓.
+    - `POST /api/produccion/ordenes` (orden 3, receta, cant=3) → 200 `PROD-2026-000003`.
+    - `POST iniciar` → 200 (salidas registradas, saldo MP bajó de 20 a 14).
+    - `POST anular` (con bodegaId) → 200 `estado=anulada`, `reversion.reversados=1` ✓. Saldo MP subió de 14 a 20 (reversión de las 6 unidades consumidas) ✓.
+    - `POST anular` sobre orden ya `finalizada` → **400** `"No se puede anular una orden finalizada"` ✓.
+    - `POST /api/produccion/ordenes` (orden 4 manual, sin receta, 2 detalles: MP 1x1500 + MO 1x5000 + CI 1x800) → 200 `PROD-2026-000004`, `costoMateriaPrima=1500`, `costoManoObra=5000`, `costoIndirectos=800`, `costoTotal=7300` ✓.
+    - `POST /api/produccion/ordenes/[id]/agregar-detalle` (CI 1x300) → 200 `costoIndirectos=1100`, `costoTotal=7600`, `costoUnitario=0` (porque cantidadProducida=0) ✓.
+    - `PUT /api/produccion/recetas/[id]` (renombra + cambia rendimiento a 0.95 + ingrediente 2.5u x 1200) → 200 `nombre="Receta demo V2"`, `rendimiento=0.95`, `ingredientes[0].subtotal=3000` (=2.5*1200) ✓.
+    - `GET /api/produccion/ordenes?estado=finalizada` → 200 `total=2`, items `PROD-2026-000001` (costoTotal=20000) y `PROD-2026-000002` (costoTotal=10000) ✓.
+16. `dev.log` final: `✓ Compiled` exitoso, todos los endpoints responden 200 (o 400 cuando esperado, ej. stock insuficiente o anular finalizada), sin errores runtime. Compilación inicial ProduccionView ~5s (Turbopack), requests subsiguientes <50ms.
+
+Stage Summary:
+- **`src/lib/produccion.ts`** (~330 líneas): 5 funciones exportadas + 1 helper de reversión. Tipos `OrdenProduccionInput`, `RecetaConIngredientes`, `RecetaIngredienteRow`, `IngredienteAplicado`, `ResultadoAplicarReceta`.
+- **9 endpoints API** bajo `/api/produccion/`: `recetas` (GET/POST/PUT), `recetas/[id]` (GET/PUT/DELETE), `recetas/[id]/calcular-costo` (GET), `ordenes` (GET/POST), `ordenes/[id]` (GET), `ordenes/[id]/agregar-detalle` (POST), `ordenes/[id]/iniciar` (POST), `ordenes/[id]/finalizar` (POST), `ordenes/[id]/anular` (POST). Todos validan `getSession()` y filtran por `session.empresaId` con `findFirst({ where: { id, empresaId } })` en operaciones por id.
+- **`src/components/produccion/produccion-view.tsx`** (~2700 líneas, client component): 4 tabs (Órdenes/Nueva orden/Recetas/Histórico). Componente principal `ProduccionView` + 6 subcomponentes: `SheetOrdenDetalle` (sheet detalle con KPIs y botones de estado), `SeccionDetalles` (tabla por tipo), `CardDetalle` (mini-card con color), `KpiCard` (KPI histórico), `FormNuevaOrden` (form inline con tabla editable + verificación stock), `DialogNuevaOrden` (modal wrapper), `DialogReceta` (CRUD receta). Helpers `apiGet/apiPost` locales. Intl es-CO COP. Dark mode `dark:`. Responsive mobile-first. Acento emerald/teal con badges colorizados por estado (borrador neutral, en_proceso teal, finalizada emerald, anulada rose) y por tipo de detalle (MP amber, MO teal, CI violet).
+- **Sidebar**: item `"produccion"` con icon `Factory`, label "Producción y Costos", grupo "Operación" (después de Compras). `NavKey` extendido.
+- **`page.tsx`**: import `ProduccionView` + caso `view === "produccion"`. Tipo `View` extendido.
+- **`src/lib/db.ts`**: 4 modelos nuevos añadidos a la lista `required` de `hasAllModels` para auto-invalidar el cache de PrismaClient tras `prisma db push` (mismo patrón que el agente VERTICALES-RESTANTES con 11 modelos).
+- `bun run lint` **EXIT 0** (0 errores, 0 warnings). Sin test code. No se tocó el schema Prisma (regla "No tocar Prisma"). No se tocaron otros módulos (excepto `db.ts` que es shared infraestructura, y `sidebar.tsx`/`page.tsx` que son integraciones explícitamente solicitadas).
+- Verificación funcional: 9 endpoints responden 200 (o 400 cuando esperado). Flujo completo: crear receta → crear orden con receta → verificar stock → iniciar (con salidas de MP que bajan el saldo) → finalizar (con entrada de producto terminado que sube el saldo del resultante y genera asiento contable CP-2026-NNNNNN con débitos=créditos) → anular (con reversión de salidas si estaba en_proceso). Costos recalculados correctamente en cada paso. Asiento cuadrado.
+- **Limitaciones**:
+  - La cuenta PUC `2335` (Costos y gastos por pagar) **no está en el seed** (`scripts/seed-marsella.ts` solo trae `150505` y `7205`). Si la empresa no la tiene creada en su Plan de Cuentas, `generarAsientoProduccion` falla **gracefulmente** al finalizar la orden: registra la entrada del producto terminado, marca la orden como `finalizada`, pero retorna `asientoContable=null` y `asientoError=<mensaje descriptivo>`. El cliente muestra un toast `warning`. Una vez creada la cuenta (manualmente o vía seed futuro), subsecuentes finalizaciones generan el asiento correctamente.
+  - El spec del asiento (`débito a 150505 (Inventario producto terminado) ... crédito a 150505 (Inventario materia prima)`) usa el mismo código PUC `150505` para ambos lados del asiento — esto parece un typo del spec original (probablemente debería ser `1445` o `1435` para producto terminado vs `1430` o `1435` para materia prima). Se sigue el spec **literalmente**: ambos movimientos se crean contra la cuenta `150505` (una con débito, otra con crédito), lo cual es contablemente válido (la cuenta queda neta) pero no separa los inventarios. Si se quiere separar, basta cambiar el código en `generarAsientoProduccion` y crear la cuenta correspondiente en el Plan de Cuentas.
+  - El `costoUnitario` final usa la cantidad producida real pasada en `finalizar` (no la `cantidadProducir` planeada), así que si se produce menos o más de lo planeado, el costo unitario se ajusta al total real dividido entre la cantidad real producida — esto es estándar en costeo por procesos.
+  - Las órdenes en estado `borrador` no tienen `fechaInicio` definido hasta que se inicia (se setea con `now()` en `iniciar`). El schema define `fechaInicio @default(now())` por lo que en la BD queda con el timestamp de creación, pero el endpoint `iniciar` lo actualiza al momento real de inicio. Esto es consistente con el spec.
+  - El endpoint de `aplicarReceta` se invoca desde `calcular-costo` (GET) y desde `iniciar` (verificación previa de stock); el endpoint `iniciar` re-verifica el stock antes de llamar `registrarSalidaMateriasPrimas` para evitar una condición de carrera entre el momento en que el usuario ve "stock suficiente" y el momento en que confirma iniciar.
+  - El `detalleServicioTecnico`-style state-machine del Taller se replicó aquí para Producción (borrador → en_proceso → finalizada, con anulación desde borrador/en_proceso). No se permite anular finalizada.
+  - El helper `DialogNuevaOrden` envuelve `FormNuevaOrden` dentro de un `Dialog` — cuando el usuario hace clic en "Nueva orden" desde el tab Órdenes, se abre el modal con el form completo. El form se reutiliza también inline en el tab "Nueva orden".
+- `bun run lint` **EXIT 0**. Sin test code. `dev.log` final limpio: `✓ Compiled` exitoso, sin errores de runtime ni compilación en archivos nuevos.
+---WORKLOG SECTION HEADERS---
+2:Task ID: ERP-Contabilidad-UI
+33:Task ID: ERP-Compras-UI
+70:Task ID: ERP-Facturacion-UI
+109:Task ID: ERP-Cartera-UI
+144:Task ID: ERP-Parametros-UI
+182:Task ID: ERP-MCP
+257:Task ID: ERP-DIAN-REAL
+318:Task ID: ERP-NOMINA
+388:Task ID: ERP-CREDITOS-PRESUPUESTO
+461:Task ID: ERP-REPORTES-PDF
+565:Task ID: ERP-BANCOS-CAJAS
+628:Task ID: ERP-VERTICALES-RESTAURANTE-HOTEL
+681:Task ID: ERP-PWA-POS
+764:Task ID: ERP-MEDIOS-MAGNETICOS-MULTITENANT
+847:Task ID: ERP-NIIF
+923:Task ID: ERP-VERTICALES-RESTANTES
+992:Task ID: ERP-IMPORTACIONES-EXCEL
+1104:Task ID: ERP-RADIAN
+1165:Task ID: ERP-NIIF-FIX
+1356:Task ID: ERP-PRODUCCION-COSTOS
