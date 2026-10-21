@@ -103,3 +103,15 @@ Thumbs.db
 
 # Dev server PID
 .zscripts/dev.pid
+
+# Caddy config (internal)
+Caddyfile
+
+# Examples (not part of project)
+/examples/
+
+# Mini services (not used in current build)
+/mini-services/
+
+# Download directory (generated)
+/download/
