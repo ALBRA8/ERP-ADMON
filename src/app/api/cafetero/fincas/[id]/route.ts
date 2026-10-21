@@ -54,7 +54,7 @@ export async function PUT(
       where: { id, empresaId: session.empresaId },
     });
     if (!exists) return notFound("Finca no encontrada");
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const { nombre, ubicacion, municipio, propietarioId, hectareas, altura, sombra, observaciones } =
       body ?? {};
     if (propietarioId) {

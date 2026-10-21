@@ -14,7 +14,7 @@ import { getSession } from "@/lib/auth";
 const itemSchema = z.object({
   usuarioServicioId: z.string(),
   lecturaActual: z.number(),
-  bloqueFacturacionId: z.string().optional(),
+  bloqueFacturacionId: z.string().nullish(),
 });
 
 const schema = z.object({
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = schema.safeParse(body);
     if (!parsed.success)
       return badRequest("Datos inválidos", parsed.error.flatten());

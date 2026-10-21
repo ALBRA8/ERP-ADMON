@@ -165,7 +165,7 @@ const asientoSchema = z.object({
     .array(
       z.object({
         cuentaId: z.string(),
-        terceroId: z.string().optional(),
+        terceroId: z.string().nullish(),
         descripcion: z.string().max(500).optional(),
         debito: z.number().nonnegative().default(0),
         credito: z.number().nonnegative().default(0),

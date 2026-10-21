@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
         orderBy: { fecha: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { cdp: { include: { rubro: true } }, tercero: true },
+        include: { cdp: { include: { rubro: true } } },
       }),
       db.cRP.count({ where }),
     ]);
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const denied = await requirePermission(session, "presupuesto:write");
     if (denied) return denied;
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = crearSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
           estado: "vigente",
           saldo: d.valor,
         },
-        include: { cdp: { include: { rubro: true } }, tercero: true },
+        include: { cdp: { include: { rubro: true } } },
       });
     });
 

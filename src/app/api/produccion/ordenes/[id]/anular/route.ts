@@ -19,7 +19,7 @@ import { reversarSalidasMateriasPrimas } from "@/lib/produccion";
 // ============================================================
 
 const schema = z.object({
-  bodegaId: z.string().optional(),
+  bodegaId: z.string().nullish(),
 });
 
 export async function POST(

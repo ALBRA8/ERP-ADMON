@@ -69,14 +69,14 @@ const terceroSchema = z.object({
   direccion: z.string().max(200).optional(),
   telefono: z.string().max(50).optional(),
   email: z.string().email().optional().or(z.literal("")),
-  ciudadId: z.string().optional(),
+  ciudadId: z.string().nullish(),
   regimenTributario: z.string().default("comun"),
   responsabilidad: z.string().default("iva"),
   cupoCredito: z.number().nonnegative().default(0),
   diasPlazo: z.number().int().nonnegative().default(0),
   cargo: z.string().max(100).optional(),
   salario: z.number().nonnegative().optional(),
-  observaciones: z.string().max(2000).optional(),
+  observaciones: z.string().max(2000).nullish(),
 });
 
 export async function POST(req: NextRequest) {
@@ -114,6 +114,9 @@ export async function POST(req: NextRequest) {
       if (err?.code === "P2002") {
         return badRequest("Ya existe un tercero con ese documento");
       }
+      if (err?.code === "P2003") {
+        return badRequest("Referencia inválida (ciudadId, actividadEconomicaId u otra FK no existe)");
+      }
       return serverError("Error al crear tercero", e);
     }
   });
@@ -138,14 +141,14 @@ const terceroUpdateSchema = z.object({
   direccion: z.string().max(200).optional(),
   telefono: z.string().max(50).optional(),
   email: z.string().email().optional().or(z.literal("")),
-  ciudadId: z.string().optional(),
+  ciudadId: z.string().nullish(),
   regimenTributario: z.string().max(30).optional(),
   responsabilidad: z.string().max(30).optional(),
   cupoCredito: z.number().nonnegative().optional(),
   diasPlazo: z.number().int().nonnegative().optional(),
   cargo: z.string().max(100).optional(),
   salario: z.number().nonnegative().optional(),
-  observaciones: z.string().max(2000).optional(),
+  observaciones: z.string().max(2000).nullish(),
   activo: z.boolean().optional(),
 });
 

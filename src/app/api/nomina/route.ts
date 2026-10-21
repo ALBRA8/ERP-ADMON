@@ -79,9 +79,9 @@ const crearSchema = z.object({
   periodoInicio: z.string(),
   periodoFin: z.string(),
   fechaPago: z.string(),
-  centroCostoId: z.string().optional(),
+  centroCostoId: z.string().nullish(),
   empleadosIds: z.array(z.string()).min(1),
-  observaciones: z.string().max(2000).optional(),
+  observaciones: z.string().max(2000).nullish(),
 });
 
 type DetallePrepared = {

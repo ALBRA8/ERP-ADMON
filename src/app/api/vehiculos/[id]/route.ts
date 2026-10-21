@@ -56,7 +56,7 @@ export async function PUT(
       where: { id, empresaId: session.empresaId },
     });
     if (!exists) return notFound("Vehículo no encontrado");
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const { terceroId, placa, marca, modelo, anio, color, kilometraje, tipo, observaciones } =
       body ?? {};
     if (terceroId) {

@@ -1169,6 +1169,8 @@ model RubroPresupuestal {
   apropiacionInicial Float               @default(0)
   createdAt          DateTime            @default(now())
   cdps               CDP[]
+  modsOrigen         ModificacionPresupuestal[] @relation("ModifOrigen")
+  modsDestino        ModificacionPresupuestal[] @relation("ModifDestino")
 
   @@unique([empresaId, codigo, vigencia])
   @@index([empresaId, vigencia])
@@ -1189,6 +1191,7 @@ model CDP {
   observaciones String?
   createdAt     DateTime          @default(now())
   crps          CRP[]
+  modificaciones ModificacionPresupuestal[]
 
   @@unique([empresaId, numero])
   @@index([empresaId, fecha])
@@ -1219,10 +1222,13 @@ model ModificacionPresupuestal {
   fecha          DateTime @default(now())
   tipo           String // adicion | traslado | reduccion
   rubroOrigenId  String?
+  rubroOrigen    RubroPresupuestal? @relation("ModifOrigen", fields: [rubroOrigenId], references: [id])
   rubroDestinoId String?
+  rubroDestino   RubroPresupuestal? @relation("ModifDestino", fields: [rubroDestinoId], references: [id])
   valor          Float
   motivo         String?
   cdpId          String?
+  cdp            CDP?   @relation(fields: [cdpId], references: [id])
   estado         String   @default("vigente")
   createdAt      DateTime @default(now())
 

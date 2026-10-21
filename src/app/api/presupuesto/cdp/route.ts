@@ -31,7 +31,6 @@ export async function GET(req: NextRequest) {
         take: pageSize,
         include: {
           rubro: true,
-          tercero: true,
           crps: { orderBy: { fecha: "desc" } },
         },
       }),
@@ -65,7 +64,7 @@ export async function POST(req: NextRequest) {
     const denied = await requirePermission(session, "presupuesto:write");
     if (denied) return denied;
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = crearSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

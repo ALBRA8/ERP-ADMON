@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     const session = await getSession();
     if (!session) return unauthorized();
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = bodegaSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

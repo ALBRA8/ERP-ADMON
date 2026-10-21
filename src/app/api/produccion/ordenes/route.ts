@@ -28,9 +28,9 @@ const detalleSchema = z.object({
 });
 
 const crearOrdenSchema = z.object({
-  productoResultanteId: z.string().optional(),
+  productoResultanteId: z.string().nullish(),
   cantidadProducir: z.number().positive(),
-  recetaId: z.string().optional(),
+  recetaId: z.string().nullish(),
   observaciones: z.string().optional(),
   detalles: z.array(detalleSchema).default([]),
 });
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = crearOrdenSchema.safeParse(body);
     if (!parsed.success)
       return badRequest("Datos inválidos", parsed.error.flatten());

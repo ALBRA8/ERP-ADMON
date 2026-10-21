@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     const session = await getSession();
     if (!session) return unauthorized();
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const eventos: any[] = Array.isArray(body?.eventos) ? body.eventos : null;
     if (!eventos || eventos.length === 0) {
       return badRequest("Se requiere un array no vacío de eventos");

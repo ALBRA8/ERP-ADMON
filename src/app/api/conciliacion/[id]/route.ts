@@ -69,7 +69,7 @@ export async function PUT(
     const session = await getSession();
     if (!session) return unauthorized();
     const { id } = await params;
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

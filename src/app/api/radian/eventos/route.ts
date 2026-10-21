@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
     const csrfDenied = await requireCsrf(req);
     if (csrfDenied) return csrfDenied;
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const { facturaCompraId, tipo, nitEmisor, cufeFactura, terceroId, observaciones } =
       body ?? {};
 

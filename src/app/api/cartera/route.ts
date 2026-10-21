@@ -55,14 +55,14 @@ export async function GET(req: NextRequest) {
 
 const reciboSchema = z.object({
   tipo: z.enum(["recibo", "egreso"]),
-  terceroId: z.string().optional(),
+  terceroId: z.string().nullish(),
   nombreTercero: z.string().min(2).max(200),
   valorTotal: z.number().positive().max(1e12),
   concepto: z.string().max(500).optional(),
   formaPago: z
     .enum(["efectivo", "tarjeta", "transferencia", "cheque"])
     .default("efectivo"),
-  observaciones: z.string().max(2000).optional(),
+  observaciones: z.string().max(2000).nullish(),
 });
 
 // ============================================================
@@ -78,6 +78,15 @@ export async function POST(req: NextRequest) {
       const parsed = await parseBody(req, reciboSchema);
       if ("error" in parsed) return parsed.error;
       const data = parsed.data;
+
+      // Validar FK terceroId (A-CRIT-007 robustez)
+      if (data.terceroId) {
+        const t = await db.tercero.findFirst({
+          where: { id: data.terceroId, empresaId: session.empresaId },
+          select: { id: true },
+        });
+        if (!t) return badRequest("Tercero no encontrado en su empresa");
+      }
 
       try {
         const item = await db.$transaction(async (tx) => {

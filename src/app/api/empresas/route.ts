@@ -94,7 +94,7 @@ export async function PUT(req: NextRequest) {
       return forbidden("Su rol no permite editar parámetros");
     }
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = empresaUpdateSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

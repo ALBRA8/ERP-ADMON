@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
 }
 
 const itemSchema = z.object({
-  productoId: z.string().optional(),
+  productoId: z.string().nullish(),
   descripcion: z.string().min(1),
   cantidad: z.number().positive(),
   precioUnitario: z.number().nonnegative(),
@@ -78,7 +78,7 @@ const itemSchema = z.object({
 
 const comandaCreateSchema = z.object({
   mesaId: z.string().min(1),
-  meseroId: z.string().optional(),
+  meseroId: z.string().nullish(),
   observaciones: z.string().optional(),
   items: z.array(itemSchema).min(1),
 });
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = comandaCreateSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

@@ -17,7 +17,7 @@ import { round } from "@/lib/currency";
 // Agrega item a la comanda abierta y recalcula total.
 // ============================================================
 const addItemSchema = z.object({
-  productoId: z.string().optional(),
+  productoId: z.string().nullish(),
   descripcion: z.string().min(1),
   cantidad: z.number().positive(),
   precioUnitario: z.number().nonnegative(),
@@ -33,7 +33,7 @@ export async function POST(
     if (!session) return unauthorized();
     const { id } = await params;
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = addItemSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

@@ -75,6 +75,10 @@ function hasAllModels(client: PrismaClient | undefined): boolean {
     "recetaIngrediente",
     "eventoRadian",
     "cierrePeriodo",
+    "modificacionPresupuestal",
+    "cDP",
+    "cRP",
+    "rubroPresupuestal",
   ];
   return required.every((m) => (client as any)[m] !== undefined);
 }

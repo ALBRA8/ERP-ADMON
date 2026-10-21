@@ -25,7 +25,8 @@ export async function POST(req: NextRequest) {
     const session = await getSession();
     if (!session) return unauthorized();
 
-    const body = (await req.json()) as PreviewBody;
+    let body: PreviewBody;
+    try { body = (await req.json()) as PreviewBody; } catch { return badRequest("JSON inválido"); }
     if (!body.targetEntity || !body.fileBuffer) {
       return badRequest("targetEntity y fileBuffer son requeridos");
     }

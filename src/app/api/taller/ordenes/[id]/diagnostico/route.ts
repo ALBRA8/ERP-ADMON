@@ -18,7 +18,7 @@ import { getSession } from "@/lib/auth";
 
 const schema = z.object({
   diagnostico: z.string().min(2),
-  tecnicoAsignadoId: z.string().optional(),
+  tecnicoAsignadoId: z.string().nullish(),
   observaciones: z.string().optional(),
 });
 
@@ -35,7 +35,7 @@ export async function POST(
     });
     if (!orden) return notFound("Orden de servicio no encontrada");
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = schema.safeParse(body);
     if (!parsed.success)
       return badRequest("Datos inválidos", parsed.error.flatten());

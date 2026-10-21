@@ -43,6 +43,15 @@ export function formatNumber(
 export type MetodoRedondeo = "half_up" | "half_even" | "down" | "up";
 
 export function round(value: number, decimals = 2, method: MetodoRedondeo = "half_up"): number {
+  // Prisma Decimal (decimal.js) llega como objeto con valueOf(): string.
+  // Number.isFinite lo rechaza (no es number primitivo) y devolvía 0.
+  // Convertimos a number primero (toFixed evita notación científica de valueOf).
+  if (typeof value === "object" && value !== null && typeof (value as any).toFixed === "function") {
+    value = Number((value as any).toFixed());
+  }
+  if (typeof value === "string") {
+    value = Number(value);
+  }
   if (!Number.isFinite(value)) return 0;
   const factor = Math.pow(10, decimals);
   switch (method) {

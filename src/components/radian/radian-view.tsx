@@ -1045,9 +1045,11 @@ function DialogNuevoEvento({
 
   // Cuando selecciona una factura, rellenar NIT y sugerir CUFE
   const onFacturaSelect = (id: string) => {
-    setFacturaCompraId(id);
-    if (id) {
-      const fc = facturas.find((f) => f.id === id);
+    // El valor "__none__" representa "sin factura de compra" (Radix no permite value="")
+    const realId = id === "__none__" ? "" : id;
+    setFacturaCompraId(realId);
+    if (realId) {
+      const fc = facturas.find((f) => f.id === realId);
       if (fc) {
         setNitEmisor(fc.nitProveedor);
         if (fc.terceroId) setTerceroId(fc.terceroId);
@@ -1102,7 +1104,7 @@ function DialogNuevoEvento({
               Factura de compra (opcional, autocompleta NIT)
             </Label>
             <Select
-              value={facturaCompraId}
+              value={facturaCompraId || "__none__"}
               onValueChange={onFacturaSelect}
               disabled={loadingFacturas || facturas.length === 0}
             >
@@ -1110,7 +1112,7 @@ function DialogNuevoEvento({
                 <SelectValue placeholder="— Sin factura de compra —" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">— Sin factura de compra —</SelectItem>
+                <SelectItem value="__none__">— Sin factura de compra —</SelectItem>
                 {facturas.map((f) => (
                   <SelectItem key={f.id} value={f.id}>
                     {f.numero} · {f.nombreProveedor} · {f.nitProveedor}

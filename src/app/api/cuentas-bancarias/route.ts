@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = createSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
 
 const updateSchema = z.object({
   id: z.string().min(1),
-  bancoId: z.string().optional(),
+  bancoId: z.string().nullish(),
   numeroCuenta: z.string().min(3).max(40).optional(),
   tipo: z.enum(["ahorro", "corriente"]).optional(),
   titular: z.string().min(2).max(150).optional(),
@@ -117,7 +117,7 @@ export async function PUT(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

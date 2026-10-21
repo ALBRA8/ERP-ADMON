@@ -69,7 +69,7 @@ export async function PUT(
       where: { id, empresaId: session.empresaId },
     });
     if (!exists) return notFound("Usuario de servicio no encontrado");
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const { terceroId, numeroContrato, direccion, estrato, uso, tarifaFija, tarifaVariable, medidor, estado } =
       body ?? {};
     if (terceroId) {

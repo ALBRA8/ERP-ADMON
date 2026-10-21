@@ -15,7 +15,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const conexion = await loadConexion(session.empresaId, id);
     if (!conexion) return notFound("Conexión no encontrada");
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const { uri } = body;
     if (!uri) return badRequest("uri requerido");
 

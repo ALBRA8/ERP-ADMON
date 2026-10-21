@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
     const denied = await requirePermission(session, "importaciones:write");
     if (denied) return denied;
 
-    const body = (await req.json()) as ExecuteBody;
+    let body: ExecuteBody;
+    try { body = (await req.json()) as ExecuteBody; } catch { return badRequest("JSON inválido"); }
     if (!body.targetEntity || !body.fileBuffer) {
       return badRequest("targetEntity y fileBuffer son requeridos");
     }

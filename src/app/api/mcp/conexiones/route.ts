@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
     const csrfDenied = await requireCsrf(req);
     if (csrfDenied) return csrfDenied;
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = createSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());
@@ -158,7 +158,7 @@ export async function PUT(req: NextRequest) {
     // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
     const csrfDenied = await requireCsrf(req);
     if (csrfDenied) return csrfDenied;
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

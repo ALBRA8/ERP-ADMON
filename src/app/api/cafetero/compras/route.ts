@@ -19,7 +19,7 @@ import { getSession } from "@/lib/auth";
 
 const compraSchema = z.object({
   terceroId: z.string().nullish(),
-  fincaId: z.string().optional(),
+  fincaId: z.string().nullish(),
   pesoBruto: z.number().positive(),
   tara: z.number().nonnegative().default(0),
   factorRendimiento: z.number().nonnegative().default(0),
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = compraSchema.safeParse(body);
     if (!parsed.success)
       return badRequest("Datos inválidos", parsed.error.flatten());

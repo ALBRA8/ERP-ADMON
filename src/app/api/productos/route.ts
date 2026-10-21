@@ -84,14 +84,14 @@ const productoSchema = z.object({
   descripcion: z.string().max(2000).optional(),
   tipo: z.enum(["producto", "servicio", "kit", "insumo"]).default("producto"),
   inventariable: z.boolean().default(true),
-  unidadMedidaId: z.string().optional(),
-  lineaId: z.string().optional(),
+  unidadMedidaId: z.string().nullish(),
+  lineaId: z.string().nullish(),
   costoPromedio: z.number().nonnegative().default(0),
   ultimoCosto: z.number().nonnegative().default(0),
   precio1: z.number().nonnegative().default(0),
   precio2: z.number().nonnegative().default(0),
   precio3: z.number().nonnegative().default(0),
-  impuestoId: z.string().optional(),
+  impuestoId: z.string().nullish(),
   tarifaIva: z.number().nonnegative().default(19),
   stockMinimo: z.number().nonnegative().default(0),
   stockMaximo: z.number().nonnegative().default(0),
@@ -116,6 +116,9 @@ export async function POST(req: NextRequest) {
       const err = e as { code?: string };
       if (err?.code === "P2002") {
         return badRequest("Ya existe un producto con ese código");
+      }
+      if (err?.code === "P2003") {
+        return badRequest("Referencia inválida (lineaId, unidadMedidaId, impuestoId u otra FK no existe)");
       }
       return serverError("Error al crear producto", e);
     }

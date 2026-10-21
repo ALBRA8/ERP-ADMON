@@ -578,7 +578,7 @@ function TabImportar() {
             </div>
           </div>
 
-          {/* Drop zone */}
+          {/* Drop zone mejorado */}
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -592,38 +592,80 @@ function TabImportar() {
               if (f) handleFile(f);
             }}
             className={cn(
-              "border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer",
+              "relative border-2 border-dashed rounded-2xl p-10 text-center transition-all duration-200 cursor-pointer group overflow-hidden",
               dragOver
-                ? "border-emerald-400 bg-emerald-50/60 dark:bg-emerald-950/30"
-                : "border-neutral-200 dark:border-neutral-700 hover:border-emerald-300 dark:hover:border-emerald-700",
+                ? "border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 scale-[1.02] shadow-lg shadow-emerald-100 dark:shadow-emerald-950/50"
+                : file
+                  ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20"
+                  : "border-neutral-300 dark:border-neutral-700 hover:border-emerald-400 dark:hover:border-emerald-700 hover:bg-neutral-50 dark:hover:bg-neutral-900/50",
             )}
             onClick={() => fileInputRef.current?.click()}
           >
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) handleFile(f);
               }}
             />
-            {file ? (
-              <div className="flex flex-col items-center gap-2">
-                <FileSpreadsheet className="w-10 h-10 text-emerald-500" />
-                <div className="font-medium">{file.name}</div>
-                <div className="text-xs text-neutral-500">
-                  {(file.size / 1024).toFixed(1)} KB · Click para cambiar
+            {dragOver ? (
+              <div className="flex flex-col items-center gap-3 animate-pulse">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center">
+                  <FileSpreadsheet className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div className="font-bold text-emerald-700 dark:text-emerald-300 text-lg">
+                  Suelta el archivo aquí
+                </div>
+                <div className="text-xs text-emerald-600 dark:text-emerald-400">
+                  Detectando automáticamente las columnas...
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-neutral-500">
-                <Upload className="w-10 h-10" />
-                <div className="font-medium">
-                  Arrastre un archivo .xlsx o click para seleccionar
+            ) : file ? (
+              <div className="flex items-center justify-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center shrink-0">
+                  <FileSpreadsheet className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
                 </div>
-                <div className="text-xs">Soporta múltiples hojas</div>
+                <div className="text-left min-w-0">
+                  <div className="font-semibold truncate">{file.name}</div>
+                  <div className="text-xs text-neutral-500 flex items-center gap-2 mt-0.5">
+                    <span>{(file.size / 1024).toFixed(1)} KB</span>
+                    <span>·</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">Listo para analizar</span>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-2 text-neutral-400 hover:text-red-500"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFile(null);
+                    setSheets(null);
+                    setValidation(null);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-neutral-400">
+                <div className="w-16 h-16 rounded-2xl bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center group-hover:bg-emerald-50 dark:group-hover:bg-emerald-950/30 transition-colors">
+                  <Upload className="w-8 h-8 group-hover:text-emerald-500 transition-colors" />
+                </div>
+                <div className="font-medium text-neutral-600 dark:text-neutral-300">
+                  Arrastra tu archivo Excel aquí
+                </div>
+                <div className="text-xs">
+                  o <span className="text-emerald-600 dark:text-emerald-400 font-medium underline">haz clic para seleccionar</span>
+                </div>
+                <div className="flex gap-2 mt-1">
+                  <Badge variant="outline" className="text-[10px]">.xlsx</Badge>
+                  <Badge variant="outline" className="text-[10px]">.xls</Badge>
+                  <Badge variant="outline" className="text-[10px]">.csv</Badge>
+                </div>
               </div>
             )}
           </div>
@@ -757,11 +799,12 @@ function TabImportar() {
               </Button>
             </div>
 
-            {/* Preview de primeras filas */}
+            {/* Preview de primeras filas editables */}
             {sheets.find((s) => s.name === activeSheet) && (
-              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto max-h-80 overflow-y-auto">
-                <div className="px-3 py-2 bg-neutral-50 dark:bg-neutral-900 text-xs text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
-                  Primeras {Math.min(5, sheets.find((s) => s.name === activeSheet)!.rows.length)} filas detectadas
+              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 overflow-x-auto max-h-96 overflow-y-auto">
+                <div className="px-3 py-2 bg-neutral-50 dark:bg-neutral-900 text-xs text-neutral-500 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+                  <span>Primeras {Math.min(10, sheets.find((s) => s.name === activeSheet)!.rows.length)} filas — <span className="text-emerald-600 dark:text-emerald-400 font-medium">edita los valores antes de importar</span></span>
+                  <Badge variant="outline" className="text-[10px]">{sheets.find((s) => s.name === activeSheet)!.rows.length} total</Badge>
                 </div>
                 <Table>
                   <TableHeader className="sticky top-0 bg-white dark:bg-neutral-900 z-10">
@@ -773,16 +816,27 @@ function TabImportar() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sheets.find((s) => s.name === activeSheet)!.rows.slice(0, 5).map((row, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="text-xs text-neutral-400">{i + 2}</TableCell>
+                    {sheets.find((s) => s.name === activeSheet)!.rows.slice(0, 10).map((row, i) => (
+                      <TableRow key={i} className="group">
+                        <TableCell className="text-xs text-neutral-400 font-mono">{i + 2}</TableCell>
                         {sheets.find((s) => s.name === activeSheet)!.columns.map((_, j) => (
-                          <TableCell key={j} className="text-xs whitespace-nowrap max-w-xs truncate">
-                            {row[j] === null || row[j] === undefined
-                              ? ""
-                              : row[j] instanceof Date
-                                ? row[j].toLocaleDateString("es-CO")
-                                : String(row[j]).slice(0, 80)}
+                          <TableCell key={j} className="p-0">
+                            <input
+                              type="text"
+                              defaultValue={
+                                row[j] === null || row[j] === undefined
+                                  ? ""
+                                  : row[j] instanceof Date
+                                    ? row[j].toLocaleDateString("es-CO")
+                                    : String(row[j])
+                              }
+                              onChange={(e) => {
+                                const s = sheets.find((s) => s.name === activeSheet)!;
+                                s.rows[i][j] = e.target.value;
+                              }}
+                              className="w-full px-2 py-1.5 text-xs bg-transparent border-0 outline-none focus:bg-emerald-50 dark:focus:bg-emerald-950/30 focus:ring-1 focus:ring-emerald-400 rounded transition-colors"
+                              placeholder="—"
+                            />
                           </TableCell>
                         ))}
                       </TableRow>

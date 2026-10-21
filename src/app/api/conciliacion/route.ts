@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 const createSchema = z.object({
   cuentaBancariaId: z.string().min(1),
-  extractoId: z.string().optional(),
+  extractoId: z.string().nullish(),
   saldoInicialLibro: z.number().default(0),
   saldoInicialExtracto: z.number().default(0),
   ajustesLibro: z.number().default(0),
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = createSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

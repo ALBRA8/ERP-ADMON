@@ -19,7 +19,7 @@ import { getSession } from "@/lib/auth";
 // Cambia comanda.estado = "facturada", fechaCierre = now(), mesa.estado = "disponible"
 // ============================================================
 const facturarSchema = z.object({
-  terceroId: z.string().optional(),
+  terceroId: z.string().nullish(),
   nombreCliente: z.string().optional(),
   nitCliente: z.string().optional(),
   formaPago: z

@@ -101,7 +101,7 @@ export async function PUT(
     });
     if (!existing) return notFound("Receta no encontrada");
 
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success)
       return badRequest("Datos inválidos", parsed.error.flatten());

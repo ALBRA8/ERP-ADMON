@@ -62,18 +62,18 @@ export async function GET(req: NextRequest) {
 }
 
 const itemSchema = z.object({
-  productoId: z.string().optional(),
+  productoId: z.string().nullish(),
   descripcion: z.string().max(500),
   cantidad: z.number().positive().max(1e9),
   unidadMedida: z.string().max(20).default("UND"),
   precioUnitario: z.number().nonnegative().max(1e12),
   descuentoPorcentaje: z.number().nonnegative().max(100).default(0),
   tarifaIva: z.number().nonnegative().max(100).default(19),
-  bodegaId: z.string().optional(),
+  bodegaId: z.string().nullish(),
 });
 
 const facturaSchema = z.object({
-  terceroId: z.string().optional(),
+  terceroId: z.string().nullish(),
   nombreCliente: z.string().min(2).max(200),
   nitCliente: z.string().max(20),
   fechaVencimiento: z.string().optional(),
@@ -83,7 +83,7 @@ const facturaSchema = z.object({
     .enum(["efectivo", "tarjeta", "transferencia", "credito", "mixto"])
     .default("efectivo"),
   efectivoRecibido: z.number().nonnegative().optional(),
-  observaciones: z.string().max(2000).optional(),
+  observaciones: z.string().max(2000).nullish(),
 });
 
 // ============================================================
@@ -99,6 +99,15 @@ export async function POST(req: NextRequest) {
     const data = parsed.data;
 
     try {
+      // 0. Validar FK terceroId (A-CRIT-007 robustez)
+      if (data.terceroId) {
+        const cli = await db.tercero.findFirst({
+          where: { id: data.terceroId, empresaId: session.empresaId },
+          select: { id: true },
+        });
+        if (!cli) return badRequest("Tercero (cliente) no encontrado en su empresa");
+      }
+
       // 1. Validaciones previas (lecturas fuera de la tx para no
       //    bloquear innecesariamente, pero son read-only).
       const resolucion = await db.resolucionDian.findFirst({
@@ -153,10 +162,18 @@ export async function POST(req: NextRequest) {
       const productosMap = new Map<string, { costoPromedio: number }>();
       if (productosIds.length > 0) {
         const productos = await db.producto.findMany({
-          where: { id: { in: productosIds } },
+          where: { id: { in: productosIds }, empresaId: session.empresaId },
           select: { id: true, costoPromedio: true },
         });
         for (const p of productos) productosMap.set(p.id, p);
+        // Validar que TODOS los productoIds existen y pertenecen al tenant
+        if (productos.length !== productosIds.length) {
+          const found = new Set(productos.map((p) => p.id));
+          const missing = productosIds.filter((id) => !found.has(id));
+          return badRequest(
+            `productoId no encontrado en su empresa: ${missing.join(", ")}`,
+          );
+        }
       }
 
       for (const item of data.items) {

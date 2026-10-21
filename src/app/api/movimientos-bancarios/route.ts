@@ -74,7 +74,7 @@ const movSchema = z.object({
   ]),
   monto: z.number().positive(),
   descripcion: z.string().optional(),
-  terceroId: z.string().optional(),
+  terceroId: z.string().nullish(),
   fecha: z.string().optional(),
 });
 
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = movSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
     const montoConSigno = esEntrada ? montoRounded : -montoRounded;
 
     // Ajusta saldo de la cuenta
-    const nuevoSaldo = round(cuenta.saldoActual + montoConSigno, 2);
+    const nuevoSaldo = round(Number(cuenta.saldoActual) + montoConSigno, 2);
     await db.cuentaBancaria.update({
       where: { id: cuenta.id },
       data: { saldoActual: nuevoSaldo },

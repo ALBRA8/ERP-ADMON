@@ -66,7 +66,7 @@ export async function PUT(req: NextRequest) {
     if (session.rol !== "admin") {
       return forbidden("Solo admin puede modificar planes");
     }
-    const body = await req.json();
+    let body; try { body = await req.json(); } catch { return badRequest("JSON inválido"); }
     const parsed = updatePlanSchema.safeParse(body);
     if (!parsed.success) {
       return badRequest("Datos inválidos", parsed.error.flatten());

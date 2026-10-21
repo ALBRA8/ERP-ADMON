@@ -76,6 +76,22 @@ export async function POST(req: NextRequest) {
     if ("error" in parsed) return parsed.error;
     const d = parsed.data;
 
+    // Validar FKs (A-CRIT-007 robustez)
+    if (d.terceroId) {
+      const t = await db.tercero.findFirst({
+        where: { id: d.terceroId, empresaId: session.empresaId },
+        select: { id: true },
+      });
+      if (!t) return badRequest("Tercero no encontrado en su empresa");
+    }
+    if (d.solicitudId) {
+      const s = await db.solicitudCredito.findFirst({
+        where: { id: d.solicitudId, empresaId: session.empresaId },
+        select: { id: true },
+      });
+      if (!s) return badRequest("Solicitud de crédito no encontrada en su empresa");
+    }
+
     try {
       // Normaliza tasa: si viene como porcentaje (ej. 24 para 24% EA),
       // la convierte a decimal (0.24).

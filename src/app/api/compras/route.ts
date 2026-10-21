@@ -52,25 +52,25 @@ export async function GET(req: NextRequest) {
 }
 
 const itemSchema = z.object({
-  productoId: z.string().optional(),
+  productoId: z.string().nullish(),
   descripcion: z.string().max(500),
   cantidad: z.number().positive().max(1e9),
   unidadMedida: z.string().max(20).default("UND"),
   precioUnitario: z.number().nonnegative().max(1e12),
   descuentoValor: z.number().nonnegative().default(0),
   tarifaIva: z.number().nonnegative().max(100).default(19),
-  bodegaDestinoId: z.string().optional(),
+  bodegaDestinoId: z.string().nullish(),
 });
 
 const compraSchema = z.object({
   proveedorFacturaNumero: z.string().max(50).optional(),
-  terceroId: z.string().optional(),
+  terceroId: z.string().nullish(),
   nombreProveedor: z.string().min(2).max(200),
   nitProveedor: z.string().max(20),
   fechaVencimiento: z.string().optional(),
   items: z.array(itemSchema).min(1),
-  bodegaDestinoId: z.string().optional(),
-  observaciones: z.string().max(2000).optional(),
+  bodegaDestinoId: z.string().nullish(),
+  observaciones: z.string().max(2000).nullish(),
 });
 
 // ============================================================
@@ -85,6 +85,32 @@ export async function POST(req: NextRequest) {
     const data = parsed.data;
 
     try {
+      // Validar FKs antes de la transacción (A-CRIT-007 + robustez)
+      if (data.terceroId) {
+        const prov = await db.tercero.findFirst({
+          where: { id: data.terceroId, empresaId: session.empresaId },
+          select: { id: true, nombre: true },
+        });
+        if (!prov) return badRequest("Tercero (proveedor) no encontrado en su empresa");
+      }
+      if (data.bodegaDestinoId) {
+        const bod = await db.bodega.findFirst({
+          where: { id: data.bodegaDestinoId, empresaId: session.empresaId },
+          select: { id: true },
+        });
+        if (!bod) return badRequest("Bodega destino no encontrada en su empresa");
+      }
+      // Validar productoId por item
+      for (const [idx, item] of data.items.entries()) {
+        if (item.productoId) {
+          const prod = await db.producto.findFirst({
+            where: { id: item.productoId, empresaId: session.empresaId },
+            select: { id: true },
+          });
+          if (!prod) return badRequest(`Item #${idx + 1}: producto no encontrado en su empresa`);
+        }
+      }
+
       // Cálculos puros (sin BD)
       let subtotal = 0;
       let descuentoTotal = 0;
