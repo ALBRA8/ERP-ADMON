@@ -115,3 +115,9 @@ Caddyfile
 
 # Download directory (generated)
 /download/
+
+# Tests scripts (internal Z.ai)
+/tests/
+
+# Upload directory (user-provided source files)
+/upload/
