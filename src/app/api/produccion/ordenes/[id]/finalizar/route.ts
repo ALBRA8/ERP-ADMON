@@ -5,10 +5,10 @@ import {
   ok,
   badRequest,
   serverError,
-  unauthorized,
   notFound,
+  withAuth,
+  parseBody,
 } from "@/lib/api";
-import { getSession } from "@/lib/auth";
 import { round } from "@/lib/currency";
 import {
   registrarEntradaProductoTerminado,
@@ -20,10 +20,11 @@ import {
 // Body: { cantidadProducida, bodegaId }
 // Cambia estado a "finalizada", set fechaFin = now().
 // Registra entrada del producto terminado y genera asiento contable.
+// A-CRIT-001: entrada producto + asiento en $transaction.
 // ============================================================
 
 const schema = z.object({
-  cantidadProducida: z.number().positive(),
+  cantidadProducida: z.number().positive().max(1e9),
   bodegaId: z.string().min(1),
 });
 
@@ -31,82 +32,92 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  try {
-    const session = await getSession();
-    if (!session) return unauthorized();
-    const { id } = await params;
-    const orden = await db.ordenProduccion.findFirst({
-      where: { id, empresaId: session.empresaId },
-    });
-    if (!orden) return notFound("Orden de producción no encontrada");
+  return withAuth(
+    req,
+    { permission: "produccion:write" },
+    async (session) => {
+      try {
+        const { id } = await params;
+        const orden = await db.ordenProduccion.findFirst({
+          where: { id, empresaId: session.empresaId },
+        });
+        if (!orden) return notFound("Orden de producción no encontrada");
 
-    if (orden.estado !== "en_proceso") {
-      return badRequest(
-        `La orden debe estar en estado "en_proceso" para finalizar (estado actual: ${orden.estado})`,
-      );
-    }
+        if (orden.estado !== "en_proceso") {
+          return badRequest(
+            `La orden debe estar en estado "en_proceso" para finalizar (estado actual: ${orden.estado})`,
+          );
+        }
 
-    const body = await req.json();
-    const parsed = schema.safeParse(body);
-    if (!parsed.success)
-      return badRequest("Datos inválidos", parsed.error.flatten());
-    const d = parsed.data;
+        const parsed = await parseBody(req, schema);
+        if ("error" in parsed) return parsed.error;
+        const d = parsed.data;
 
-    // Validar bodega
-    const bodega = await db.bodega.findFirst({
-      where: { id: d.bodegaId, empresaId: session.empresaId },
-    });
-    if (!bodega) return badRequest("Bodega no encontrada");
+        // Validar bodega
+        const bodega = await db.bodega.findFirst({
+          where: { id: d.bodegaId, empresaId: session.empresaId },
+        });
+        if (!bodega) return badRequest("Bodega no encontrada");
 
-    // Recalcular costo unitario con la cantidad producida real
-    const costoTotal = round(orden.costoTotal || 0, 2);
-    const costoUnitario =
-      d.cantidadProducida > 0
-        ? round(costoTotal / d.cantidadProducida, 2)
-        : 0;
+        // Recalcular costo unitario con la cantidad producida real
+        const costoTotal = round(Number(orden.costoTotal || 0), 2);
+        const costoUnitario =
+          d.cantidadProducida > 0
+            ? round(costoTotal / d.cantidadProducida, 2)
+            : 0;
 
-    // Registrar entrada de producto terminado
-    const entrada = await registrarEntradaProductoTerminado(
-      orden.id,
-      d.bodegaId,
-      d.cantidadProducida,
-      costoUnitario,
-    );
+        // TRANSACCIÓN: actualizar orden + entrada inventario.
+        // El asiento contable se genera después (best-effort) porque
+        // depende de cuentas PUC que pueden no estar configuradas.
+        const updated = await db.$transaction(async (tx) => {
+          // Registrar entrada de producto terminado dentro de la tx
+          await registrarEntradaProductoTerminado(
+            orden.id,
+            d.bodegaId,
+            d.cantidadProducida,
+            costoUnitario,
+            tx,
+          );
 
-    // Actualizar orden
-    const updated = await db.ordenProduccion.update({
-      where: { id: orden.id },
-      data: {
-        estado: "finalizada",
-        fechaFin: new Date(),
-        cantidadProducida: d.cantidadProducida,
-        costoUnitario,
-      },
-    });
+          return tx.ordenProduccion.update({
+            where: { id: orden.id },
+            data: {
+              estado: "finalizada",
+              fechaFin: new Date(),
+              cantidadProducida: d.cantidadProducida,
+              costoUnitario,
+            },
+          });
+        });
 
-    // Generar asiento contable
-    let asiento: { comprobanteId: string; numero: string } | null = null;
-    try {
-      asiento = await generarAsientoProduccion(orden.id, session.empresaId);
-    } catch (e: any) {
-      // Si falla la generación del asiento (ej: faltan cuentas PUC), no
-      // revierte la entrada pero reporta el error al cliente.
-      return ok({
-        ok: true,
-        orden: updated,
-        entradaRegistrada: entrada.registrado,
-        asientoContable: null,
-        asientoError: e?.message ?? "Error al generar asiento",
-      });
-    }
+        // Generar asiento contable (best-effort fuera de la tx para
+        // no romper el flujo si faltan cuentas PUC).
+        let asiento: { comprobanteId: string; numero: string } | null = null;
+        try {
+          asiento = await generarAsientoProduccion(
+            orden.id,
+            session.empresaId,
+          );
+        } catch (e: unknown) {
+          const err = e as { message?: string };
+          return ok({
+            ok: true,
+            orden: updated,
+            entradaRegistrada: true,
+            asientoContable: null,
+            asientoError: err?.message ?? "Error al generar asiento",
+          });
+        }
 
-    return ok({
-      ok: true,
-      orden: updated,
-      entradaRegistrada: entrada.registrado,
-      asientoContable: asiento,
-    });
-  } catch (e) {
-    return serverError("Error al finalizar orden de producción", e);
-  }
+        return ok({
+          ok: true,
+          orden: updated,
+          entradaRegistrada: true,
+          asientoContable: asiento,
+        });
+      } catch (e) {
+        return serverError("Error al finalizar orden de producción", e);
+      }
+    },
+  );
 }

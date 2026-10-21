@@ -8,7 +8,7 @@ import {
   unauthorized,
   getQueryInt,
 } from "@/lib/api";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePermission } from "@/lib/auth";
 
 // ============================================================
 // GET /api/presupuesto/crp
@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    // FIX-SEGURIDAD H-CRIT-003: RBAC — presupuesto:write.
+    const denied = await requirePermission(session, "presupuesto:write");
+    if (denied) return denied;
 
     const body = await req.json();
     const parsed = crearSchema.safeParse(body);

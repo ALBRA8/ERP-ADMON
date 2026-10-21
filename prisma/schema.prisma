@@ -66,6 +66,7 @@ model Empresa {
   actividadesEconomicas ActividadEconomica[]
   planSuscripcion       PlanSuscripcion?
   auditoriaMultiTenant  AuditoriaMultiTenant[]
+  cierresPeriodo        CierrePeriodo[]
 }
 
 // ---------- Seguridad / RBAC (Hermes §5.1 mejorado) ----------
@@ -401,8 +402,8 @@ model SaldoInventario {
   bodegaId      String
   bodega        Bodega   @relation(fields: [bodegaId], references: [id], onDelete: Cascade)
   cantidad      Float    @default(0)
-  costoTotal    Float    @default(0)
-  costoPromedio Float    @default(0) // = costoTotal / cantidad
+  costoTotal    Decimal  @default(0) // A-CRIT-002: dinero → Decimal
+  costoPromedio Decimal  @default(0) // = costoTotal / cantidad
   stockMinimo   Float    @default(0)
   updatedAt     DateTime @updatedAt
 
@@ -436,8 +437,8 @@ model MovimientoInventario {
   bodega        Bodega   @relation(fields: [bodegaId], references: [id])
   tipo          String // entrada | salida | traslado | ajuste
   cantidad      Float // + entrada, - salida
-  costoUnitario Float
-  costoTotal    Float
+  costoUnitario Decimal // A-CRIT-002: dinero → Decimal
+  costoTotal    Decimal // A-CRIT-002: dinero → Decimal
   documentoTipo String? // FAC_VENTA, COMPRA, AJUSTE...
   documentoId   String?
   loteId        String?
@@ -469,16 +470,16 @@ model FacturaVenta {
   fechaVencimiento DateTime?
   // Items
   detalles         DetalleFacturaVenta[]
-  // Totales
-  subtotalBruto    Float                 @default(0) // antes de descuentos
-  descuentoTotal   Float                 @default(0)
-  subtotalNeto     Float                 @default(0) // subtotal - descuento
-  totalIva         Float                 @default(0)
-  totalImpoconsumo Float                 @default(0)
-  totalReteFuente  Float                 @default(0)
-  totalReteICA     Float                 @default(0)
-  totalReteIva     Float                 @default(0)
-  total            Float                 @default(0)
+  // Totales — A-CRIT-002: dinero → Decimal
+  subtotalBruto    Decimal               @default(0) // antes de descuentos
+  descuentoTotal   Decimal               @default(0)
+  subtotalNeto     Decimal               @default(0) // subtotal - descuento
+  totalIva         Decimal               @default(0)
+  totalImpoconsumo Decimal               @default(0)
+  totalReteFuente  Decimal               @default(0)
+  totalReteICA     Decimal               @default(0)
+  totalReteIva     Decimal               @default(0)
+  total            Decimal               @default(0)
   // DIAN
   cufe             String? // Código Único de Factura Electrónica (mock inicial)
   qrCode           String? // URL de representación DIAN
@@ -488,10 +489,10 @@ model FacturaVenta {
   esPOS            Boolean               @default(false)
   cajeroId         String?
   formaPago        String? // efectivo | tarjeta | transferencia | credito | mixto
-  efectivoRecibido Float?
-  cambio           Float?
+  efectivoRecibido Decimal?
+  cambio           Decimal?
   // Cartera
-  saldoPendiente   Float                 @default(0) // si formaPago=credito
+  saldoPendiente   Decimal               @default(0) // si formaPago=credito
   estadoCartera    String                @default("pagada") // pagada | parcial | pendiente | vencida
   // Estado
   estado           String                @default("vigente") // vigente | anulada
@@ -513,15 +514,15 @@ model DetalleFacturaVenta {
   descripcion         String
   cantidad            Float
   unidadMedida        String       @default("UND")
-  precioUnitario      Float
+  precioUnitario      Decimal // A-CRIT-002: dinero → Decimal
   descuentoPorcentaje Float        @default(0)
-  descuentoValor      Float        @default(0)
-  subtotal            Float
+  descuentoValor      Decimal      @default(0) // A-CRIT-002: dinero → Decimal
+  subtotal            Decimal // A-CRIT-002: dinero → Decimal
   tarifaIva           Float        @default(19)
-  iva                 Float        @default(0)
-  impoconsumo         Float        @default(0)
-  total               Float
-  costoUnitario       Float        @default(0) // para utilidad
+  iva                 Decimal      @default(0) // A-CRIT-002: dinero → Decimal
+  impoconsumo         Decimal      @default(0) // A-CRIT-002: dinero → Decimal
+  total               Decimal // A-CRIT-002: dinero → Decimal
+  costoUnitario       Decimal      @default(0) // A-CRIT-002: dinero → Decimal — para utilidad
   bodegaId            String?
   loteId              String?
 
@@ -543,13 +544,13 @@ model FacturaCompra {
   fecha                  DateTime               @default(now())
   fechaVencimiento       DateTime?
   detalles               DetalleFacturaCompra[]
-  subtotal               Float                  @default(0)
-  descuentoTotal         Float                  @default(0)
-  totalIva               Float                  @default(0) // IVA descontable
-  totalImpoconsumo       Float                  @default(0)
-  totalRetenciones       Float                  @default(0)
-  total                  Float                  @default(0)
-  saldoPendiente         Float                  @default(0)
+  subtotal               Decimal                @default(0) // A-CRIT-002: dinero → Decimal
+  descuentoTotal         Decimal                @default(0) // A-CRIT-002: dinero → Decimal
+  totalIva               Decimal                @default(0) // A-CRIT-002: dinero → Decimal — IVA descontable
+  totalImpoconsumo       Decimal                @default(0) // A-CRIT-002: dinero → Decimal
+  totalRetenciones       Decimal                @default(0) // A-CRIT-002: dinero → Decimal
+  total                  Decimal                @default(0) // A-CRIT-002: dinero → Decimal
+  saldoPendiente         Decimal                @default(0) // A-CRIT-002: dinero → Decimal
   estadoCartera          String                 @default("pendiente")
   bodegaDestinoId        String?
   estado                 String                 @default("vigente") // vigente | anulada
@@ -570,12 +571,12 @@ model DetalleFacturaCompra {
   descripcion     String
   cantidad        Float
   unidadMedida    String        @default("UND")
-  precioUnitario  Float
-  descuentoValor  Float         @default(0)
-  subtotal        Float
+  precioUnitario  Decimal // A-CRIT-002: dinero → Decimal
+  descuentoValor  Decimal       @default(0) // A-CRIT-002: dinero → Decimal
+  subtotal        Decimal // A-CRIT-002: dinero → Decimal
   tarifaIva       Float         @default(19)
-  iva             Float         @default(0)
-  total           Float
+  iva             Decimal       @default(0) // A-CRIT-002: dinero → Decimal
+  total           Decimal // A-CRIT-002: dinero → Decimal
   bodegaDestinoId String?
 
   @@index([facturaId])
@@ -593,7 +594,7 @@ model ReciboCaja {
   tercero            Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
   nombreTercero      String
   fecha              DateTime @default(now())
-  valorTotal         Float
+  valorTotal         Decimal // A-CRIT-002: dinero → Decimal
   concepto           String?
   formaPago          String // efectivo | tarjeta | transferencia | cheque
   bancoId            String?
@@ -616,7 +617,7 @@ model ComprobanteEgreso {
   tercero           Tercero? @relation(fields: [terceroId], references: [id], onDelete: SetNull)
   nombreTercero     String
   fecha             DateTime @default(now())
-  valorTotal        Float
+  valorTotal        Decimal // A-CRIT-002: dinero → Decimal
   concepto          String?
   formaPago         String // efectivo | transferencia | cheque
   bancoId           String?
@@ -711,8 +712,8 @@ model MovimientoContable {
   tercero       Tercero?    @relation(fields: [terceroId], references: [id], onDelete: SetNull)
   centroCostoId String?
   descripcion   String?
-  debito        Float       @default(0)
-  credito       Float       @default(0)
+  debito        Decimal     @default(0) // A-CRIT-002: dinero → Decimal
+  credito       Decimal     @default(0) // A-CRIT-002: dinero → Decimal
   fecha         DateTime    @default(now())
   createdAt     DateTime    @default(now())
 
@@ -811,12 +812,12 @@ model Nomina {
   fechaPago              DateTime
   centroCostoId          String?
   estado                 String   @default("borrador") // borrador | causada | pagada | anulada
-  // Totales
-  totalDevengos          Float    @default(0)
-  totalDeducciones       Float    @default(0)
-  totalAportesPatronales Float    @default(0)
-  totalProvisiones       Float    @default(0)
-  netoAPagar             Float    @default(0)
+  // Totales — A-CRIT-002: dinero → Decimal
+  totalDevengos          Decimal  @default(0)
+  totalDeducciones       Decimal  @default(0)
+  totalAportesPatronales Decimal  @default(0)
+  totalProvisiones       Decimal  @default(0)
+  netoAPagar             Decimal  @default(0)
   // Electrónica DIAN (CUNE)
   cune                   String? // Código Único de Nómina Electrónica (global)
   xmlUBL                 String? // XML global (no se usa por ahora, se genera por empleado)
@@ -839,18 +840,18 @@ model DetalleNomina {
   empresaId         String
   terceroId         String // empleado (Tercero tipo=empleado) — raw FK sin relation para no tocar schema Tercero
   // Bases
-  salarioBasico     Float
+  salarioBasico     Decimal // A-CRIT-002: dinero → Decimal
   diasLaborados     Float    @default(30)
-  ibc               Float    @default(0)
+  ibc               Decimal  @default(0) // A-CRIT-002: dinero → Decimal
   // Devengos y deducciones como JSON
   devengos          String? // JSON array: [{ codigo, nombre, valor }]
   deducciones       String? // JSON array: [{ codigo, nombre, valor }]
   aportesPatronales String? // JSON
   provisiones       String? // JSON
-  // Totales del empleado
-  totalDevengado    Float    @default(0)
-  totalDeducciones  Float    @default(0)
-  netoAPagar        Float    @default(0)
+  // Totales del empleado — A-CRIT-002: dinero → Decimal
+  totalDevengado    Decimal  @default(0)
+  totalDeducciones  Decimal  @default(0)
+  netoAPagar        Decimal  @default(0)
   // Nómina electrónica específica
   cuneEmpleado      String? // CUNE individual (por empleado)
   xmlEmpleado       String?
@@ -956,7 +957,7 @@ model CuentaBancaria {
   numeroCuenta          String
   tipo                  String                 @default("corriente") // ahorro | corriente
   titular               String
-  saldoActual           Float                  @default(0)
+  saldoActual           Decimal                @default(0) // A-CRIT-002: dinero → Decimal
   moneda                String                 @default("COP")
   activa                Boolean                @default(true)
   createdAt             DateTime               @default(now())
@@ -975,7 +976,7 @@ model MovimientoBancario {
   cuentaBancaria   CuentaBancaria @relation(fields: [cuentaBancariaId], references: [id], onDelete: Cascade)
   fecha            DateTime       @default(now())
   tipo             String // deposito | retiro | transferencia | cheque | nota | interes | comision
-  monto            Float // positivo: entrada, negativo: salida
+  monto            Decimal // A-CRIT-002: dinero → Decimal — positivo: entrada, negativo: salida
   descripcion      String?
   terceroId        String?
   comprobanteId    String? // comprobante contable asociado
@@ -1118,13 +1119,13 @@ model Credito {
   tercero        Tercero?          @relation(fields: [terceroId], references: [id], onDelete: SetNull)
   solicitudId    String?
   solicitud      SolicitudCredito? @relation(fields: [solicitudId], references: [id])
-  montoPrincipal Float
-  tasaInteres    Float // % EA
+  montoPrincipal Decimal // A-CRIT-002: dinero → Decimal
+  tasaInteres    Float // % EA (tasa, no dinero — mantiene Float)
   plazoMeses     Int
   cuotaN         Int
   fechaInicio    DateTime
   fechaFin       DateTime?
-  saldoCapital   Float             @default(0)
+  saldoCapital   Decimal           @default(0) // A-CRIT-002: dinero → Decimal
   estado         String            @default("vigente") // vigente | pagado | en_mora | anulado
   cuotas         CuotaCredito[]
   createdAt      DateTime          @default(now())
@@ -1139,10 +1140,10 @@ model CuotaCredito {
   empresaId           String
   numero              Int // 1, 2, 3...
   fechaVencimiento    DateTime
-  capital             Float
-  interes             Float
-  totalCuota          Float
-  saldoCapital        Float // saldo capital restante después de esta cuota
+  capital             Decimal // A-CRIT-002: dinero → Decimal
+  interes             Decimal // A-CRIT-002: dinero → Decimal
+  totalCuota          Decimal // A-CRIT-002: dinero → Decimal
+  saldoCapital        Decimal // A-CRIT-002: dinero → Decimal — saldo capital restante después de esta cuota
   estado              String    @default("pendiente") // pendiente | pagada | en_mora
   fechaPago           DateTime?
   comprobanteEgresoId String?
@@ -1360,12 +1361,12 @@ model CompraCafe {
   pesoNeto          Float // calculado
   factorRendimiento Float               @default(0) // % pasilla/defecto
   humedad           Float               @default(0) // %
-  // Liquidación
-  precioBaseKg      Float // precio por kg de café pergamino
-  valorBruto        Float // pesoNeto * precioBaseKg
-  descuentos        Float               @default(0) // humedad, broca, etc.
-  retenciones       Float               @default(0) // retefuente 0.5%
-  valorPagar        Float // valorBruto - descuentos - retenciones
+  // Liquidación — A-CRIT-002: dinero → Decimal
+  precioBaseKg      Decimal // precio por kg de café pergamino
+  valorBruto        Decimal // pesoNeto * precioBaseKg
+  descuentos        Decimal             @default(0) // humedad, broca, etc.
+  retenciones       Decimal             @default(0) // retefuente 0.5%
+  valorPagar        Decimal // valorBruto - descuentos - retenciones
   estado            String              @default("vigente") // vigente | liquidado | pagado | anulado
   observaciones     String?
   // Control de calidad (1-1)
@@ -1781,4 +1782,23 @@ model EventoRadian {
   @@unique([empresaId, numero])
   @@index([empresaId, tipo])
   @@index([empresaId, estado])
+}
+
+// ---------- Cierre Contable (Hermes §5.12 — N-CRIT-008) ----------
+
+model CierrePeriodo {
+  id            String   @id @default(cuid())
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  anio          Int
+  mes           Int // 1-12 (0 = cierre anual)
+  tipo          String // mensual | anual
+  estado        String   @default("cerrado") // cerrado | abierto
+  fechaCierre   DateTime @default(now())
+  userId        String?
+  observaciones String?
+  createdAt     DateTime @default(now())
+
+  @@unique([empresaId, anio, mes])
+  @@index([empresaId, anio])
 }

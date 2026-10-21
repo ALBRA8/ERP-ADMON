@@ -196,12 +196,14 @@ function escXML(s: string): string {
 }
 
 // ---------- Helper: validar dígito verificación NIT Colombia ----------
+// Algoritmo oficial DIAN (Resolución DIAN 380/2019):
+// factores fijos [71, 67, 59, 53, 47, 43, 41, 37, 29, 23] — 10 factores,
+// SIN duplicar el 59 y CON el 23 final. Aplicar sobre los últimos 10 dígitos
+// del NIT (rellenando con ceros a la izquierda si hace falta).
 export function calcularDigitoVerificacion(nit: string): string {
-  // Algoritmo oficial DIAN: factores 71, 67, 59, 59, 53, 47, 43, 41, 37, 29
-  const factores = [71, 67, 59, 59, 53, 47, 43, 41, 37, 29];
+  const factores = [71, 67, 59, 53, 47, 43, 41, 37, 29, 23];
   let nitLimpio = nit.replace(/\D/g, "");
   if (nitLimpio.length === 0) return "";
-  // rellenar a 10 dígitos
   while (nitLimpio.length < 10) nitLimpio = "0" + nitLimpio;
   const arr = nitLimpio.split("").slice(-10);
   let suma = 0;

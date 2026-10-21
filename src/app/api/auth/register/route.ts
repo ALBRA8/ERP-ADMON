@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { registerUser } from "@/lib/auth";
 import { z } from "zod";
 import { ok, badRequest, serverError } from "@/lib/api";
+import { auditAction } from "@/lib/tenant";
+import { logInfo } from "@/lib/logger";
 
 const schema = z.object({
   empresa: z.object({
@@ -32,6 +34,28 @@ export async function POST(req: NextRequest) {
     if ("error" in result) {
       return badRequest(result.error);
     }
+
+    // H-ALT-008: auditar registro de empresa nueva.
+    await auditAction(
+      {
+        userId: result.usuario.id,
+        empresaId: result.empresa.id,
+        email: result.usuario.email,
+        nombre: result.usuario.nombre,
+        rol: result.usuario.rol as any,
+      },
+      "empresa_register",
+      "empresa",
+      result.empresa.id,
+      { nit: result.empresa.nit, razonSocial: result.empresa.razonSocial },
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      req.headers.get("user-agent")?.slice(0, 200) ?? null,
+    );
+    logInfo("empresa registrada", {
+      empresaId: result.empresa.id,
+      nit: result.empresa.nit,
+    });
+
     return ok({
       usuario: {
         id: result.usuario.id,

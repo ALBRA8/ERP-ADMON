@@ -16,7 +16,8 @@ import {
   forbidden,
   getQuery,
 } from "@/lib/api";
-import { getSession, hasPermission } from "@/lib/auth";
+import { getSession, hasPermission, requirePermission } from "@/lib/auth";
+import { requireCsrf } from "@/lib/csrf";
 
 // ---------- GET ----------
 export async function GET(req: NextRequest) {
@@ -81,9 +82,15 @@ export async function PUT(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
-    // Cualquier usuario autenticado puede leer; sólo admin escribe empresa
-    if (!hasPermission(session.rol, "parametros:read")) {
-      // contador tiene parametros:read; admin tiene '*'
+    // FIX-SEGURIDAD H-CRIT-003: RBAC granular — solo admin y contador.
+    const denied = await requirePermission(session, "parametros:write");
+    if (denied) return denied;
+    // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
+    const csrfDenied = await requireCsrf(req);
+    if (csrfDenied) return csrfDenied;
+    // Backward-compat: el check anterior era parametros:read; lo dejamos
+    // como defensa en profundidad (ya cubierto por requirePermission arriba).
+    if (!hasPermission(session.rol, "parametros:write")) {
       return forbidden("Su rol no permite editar parámetros");
     }
 

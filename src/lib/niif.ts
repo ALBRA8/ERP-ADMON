@@ -32,7 +32,7 @@ import {
   type SaldosPorCategoria,
 } from "@/lib/niif-mapping";
 
-const TASA_IMPUESTO_RENTA = 0.33; // 33% en Colombia (sujeto a cambios)
+const TASA_IMPUESTO_RENTA = 0.35; // 35% Ley 1819/2016 (años gravables 2017+)
 
 // ============================================================
 // Helpers internos

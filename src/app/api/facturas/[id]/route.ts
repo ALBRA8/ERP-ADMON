@@ -7,7 +7,9 @@ import {
   unauthorized,
   notFound,
 } from "@/lib/api";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePermission } from "@/lib/auth";
+import { requireCsrf } from "@/lib/csrf";
+import { auditAction } from "@/lib/tenant";
 
 // ============================================================
 // GET /api/facturas/[id]
@@ -51,6 +53,12 @@ export async function PUT(
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    // FIX-SEGURIDAD H-CRIT-003: RBAC — anular factura requiere facturas:write.
+    const denied = await requirePermission(session, "facturas:write");
+    if (denied) return denied;
+    // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
+    const csrfDenied = await requireCsrf(req);
+    if (csrfDenied) return csrfDenied;
     const { id } = await params;
     if (!id) return badRequest("id requerido");
 
@@ -95,6 +103,17 @@ export async function PUT(
         },
         data: { estado: "anulado" },
       });
+
+      // FIX-SEGURIDAD H-ALT-008: auditar anulación de factura.
+      await auditAction(
+        session,
+        "factura_anular",
+        "facturaVenta",
+        factura.id,
+        { numero: factura.numero, total: factura.total },
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+        req.headers.get("user-agent")?.slice(0, 200) ?? null,
+      );
 
       return ok({ ok: true, estado: "anulada", id: factura.id });
     }

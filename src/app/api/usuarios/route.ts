@@ -15,8 +15,11 @@ import {
   unauthorized,
   forbidden,
 } from "@/lib/api";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePermission } from "@/lib/auth";
 import { hashPassword } from "@/lib/crypto";
+import { requireCsrf } from "@/lib/csrf";
+import { auditAction } from "@/lib/tenant";
+import { logInfo } from "@/lib/logger";
 
 // ---------- GET ----------
 export async function GET() {
@@ -61,6 +64,12 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    // FIX-SEGURIDAD H-CRIT-003: RBAC granular.
+    const denied = await requirePermission(session, "usuarios:write");
+    if (denied) return denied;
+    // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
+    const csrfDenied = await requireCsrf(req);
+    if (csrfDenied) return csrfDenied;
     if (session.rol !== "admin") {
       return forbidden("Sólo el administrador puede crear usuarios");
     }
@@ -105,6 +114,16 @@ export async function POST(req: NextRequest) {
         updatedAt: true,
       },
     });
+
+    // FIX-SEGURIDAD H-ALT-008: auditar creación de usuario.
+    await auditAction(
+      session,
+      "usuario_create",
+      "usuario",
+      nuevo.id,
+      { email: nuevo.email, nombre: nuevo.nombre, rol: nuevo.rol },
+    );
+    logInfo("usuario creado", { userId: nuevo.id, rol: nuevo.rol });
 
     return ok(nuevo);
   } catch (e) {

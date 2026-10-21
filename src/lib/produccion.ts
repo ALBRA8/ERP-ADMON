@@ -221,13 +221,21 @@ export async function registrarSalidaMateriasPrimas(
  * productoResultante, en la bodega indicada, con el costo unitario calculado.
  * Idempotente: si ya existe entrada para este documento, no la duplica.
  */
+// Tipo helper: la transacción interactiva de Prisma tiene la misma
+// "shape" que el client para los modelos que usamos aquí. Permitimos
+// pasar opcionalmente una tx para que la entrada se ejecute dentro
+// de la transacción del caller (A-CRIT-001).
+type TxClient = typeof db;
+
 export async function registrarEntradaProductoTerminado(
   ordenId: string,
   bodegaId: string,
   cantidadProducida: number,
   costoUnitario: number,
+  tx?: TxClient,
 ): Promise<{ registrado: boolean; movimientoId: string | null }> {
-  const orden = await db.ordenProduccion.findUnique({
+  const client = tx ?? db;
+  const orden = await client.ordenProduccion.findUnique({
     where: { id: ordenId },
   });
   if (!orden) throw new Error("Orden de producción no encontrada");
@@ -236,13 +244,13 @@ export async function registrarEntradaProductoTerminado(
       "La orden no tiene producto resultante configurado — no se puede registrar entrada",
     );
   }
-  const bodega = await db.bodega.findFirst({
+  const bodega = await client.bodega.findFirst({
     where: { id: bodegaId, empresaId: orden.empresaId },
   });
   if (!bodega) throw new Error("Bodega no encontrada");
 
   // Idempotente
-  const prev = await db.movimientoInventario.findFirst({
+  const prev = await client.movimientoInventario.findFirst({
     where: {
       empresaId: orden.empresaId,
       bodegaId,
@@ -254,6 +262,84 @@ export async function registrarEntradaProductoTerminado(
     select: { id: true },
   });
   if (prev) return { registrado: false, movimientoId: prev.id };
+
+  // Si recibimos tx, registramos el movimiento directamente con esa
+  // tx (no podemos reusar `registrarMovimientoInventario` que usa el
+  // client global). En ese caso replicamos la lógica mínima de
+  // entrada + recálculo de costo promedio.
+  if (tx) {
+    const cantidad = Math.abs(cantidadProducida);
+    const costoTotal = round(cantidad * costoUnitario, 2);
+    await tx.movimientoInventario.create({
+      data: {
+        empresaId: orden.empresaId,
+        productoId: orden.productoResultanteId,
+        bodegaId,
+        tipo: "entrada",
+        cantidad,
+        costoUnitario,
+        costoTotal,
+        documentoTipo: "ORDEN_PRODUCCION_ENTRADA",
+        documentoId: orden.id,
+        fecha: new Date(),
+      },
+    });
+
+    const saldo = await tx.saldoInventario.findUnique({
+      where: {
+        productoId_bodegaId: {
+          productoId: orden.productoResultanteId,
+          bodegaId,
+        },
+      },
+    });
+    if (saldo) {
+      const prevCantidad = Number(saldo.cantidad);
+      const prevCostoProm = Number(saldo.costoPromedio);
+      const prevTotal = round(prevCantidad * prevCostoProm, 2);
+      const entryTotal = round(cantidad * costoUnitario, 2);
+      const nuevaCantidad = round(prevCantidad + cantidad, 4);
+      const nuevoCostoPromedio =
+        nuevaCantidad > 0
+          ? round((prevTotal + entryTotal) / nuevaCantidad, 4)
+          : 0;
+      const nuevoCostoTotal = round(prevTotal + entryTotal, 2);
+      await tx.saldoInventario.update({
+        where: { id: saldo.id },
+        data: {
+          cantidad: nuevaCantidad,
+          costoTotal: nuevoCostoTotal,
+          costoPromedio: nuevoCostoPromedio,
+        },
+      });
+      await tx.producto.update({
+        where: { id: orden.productoResultanteId },
+        data: {
+          costoPromedio: nuevoCostoPromedio,
+          ultimoCosto: costoUnitario,
+        },
+      });
+    } else {
+      await tx.saldoInventario.create({
+        data: {
+          empresaId: orden.empresaId,
+          productoId: orden.productoResultanteId,
+          bodegaId,
+          cantidad,
+          costoTotal,
+          costoPromedio: costoUnitario,
+        },
+      });
+      await tx.producto.update({
+        where: { id: orden.productoResultanteId },
+        data: {
+          costoPromedio: costoUnitario,
+          ultimoCosto: costoUnitario,
+        },
+      });
+    }
+    return { registrado: true, movimientoId: null };
+  }
 
   const mov = await registrarMovimientoInventario({
     empresaId: orden.empresaId,

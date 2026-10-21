@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { ok, badRequest, serverError, unauthorized } from "@/lib/api";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePermission } from "@/lib/auth";
 import {
   parseExcelFile,
   detectarMapeoColumnas,
@@ -9,7 +9,7 @@ import {
   type ImportResult,
 } from "@/lib/import-excel";
 import { IMPORT_SCHEMAS } from "@/lib/import-schemas";
-import { db } from "@/lib/db";
+import { auditAction } from "@/lib/tenant";
 
 interface ExecuteBody {
   targetEntity: string;
@@ -28,6 +28,9 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    // FIX-SEGURIDAD H-CRIT-003: RBAC — importaciones:write (solo admin/contador).
+    const denied = await requirePermission(session, "importaciones:write");
+    if (denied) return denied;
 
     const body = (await req.json()) as ExecuteBody;
     if (!body.targetEntity || !body.fileBuffer) {
@@ -91,26 +94,24 @@ export async function POST(req: NextRequest) {
 
     // Persistir auditoría en AuditoriaMultiTenant
     try {
-      await db.auditoriaMultiTenant.create({
-        data: {
-          empresaId: session.empresaId,
-          userId: session.userId,
-          accion: "import_excel",
-          entidad: body.targetEntity,
-          detalles: JSON.stringify({
-            entity: body.targetEntity,
-            fileName: body.fileName,
-            totalRows: importRes.total,
-            inserted: importRes.inserted,
-            updated: importRes.updated,
-            failed: importRes.failed,
-            durationMs: importRes.durationMs,
-            summary: `Importación masiva Excel: ${body.fileName ?? "archivo.xlsx"} (${importRes.inserted} ins, ${importRes.updated} act, ${importRes.failed} fall)`,
-          }),
-          ip: null,
-          userAgent: req.headers.get("user-agent")?.slice(0, 200) ?? null,
+      await auditAction(
+        session,
+        "import_excel",
+        body.targetEntity,
+        undefined,
+        {
+          entity: body.targetEntity,
+          fileName: body.fileName,
+          totalRows: importRes.total,
+          inserted: importRes.inserted,
+          updated: importRes.updated,
+          failed: importRes.failed,
+          durationMs: importRes.durationMs,
+          summary: `Importación masiva Excel: ${body.fileName ?? "archivo.xlsx"} (${importRes.inserted} ins, ${importRes.updated} act, ${importRes.failed} fall)`,
         },
-      });
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+        req.headers.get("user-agent")?.slice(0, 200) ?? null,
+      );
     } catch {
       // no crítico
     }

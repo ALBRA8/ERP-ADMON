@@ -2,17 +2,20 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { ok, unauthorized } from "@/lib/api";
 import { procesarColaDIAN } from "@/lib/dian-real";
+import { safeEqualStrings } from "@/lib/crypto";
 
 // ============================================================
 // POST /api/dian/cron
 // Endpoint para invocar desde un cron externo. Protegido con
 // header X-Cron-Secret == process.env.CRON_SECRET (401 si no coincide).
 // Procesa la cola de DIANEnvio pendientes para TODAS las empresas.
+// FIX-SEGURIDAD H-ALT-006 (audit): usar timingSafeEqual para evitar
+// timing attacks en la comparación del secret.
 // ============================================================
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get("x-cron-secret");
-  const expected = process.env.CRON_SECRET;
-  if (!expected || secret !== expected) {
+  const secret = req.headers.get("x-cron-secret") ?? "";
+  const expected = process.env.CRON_SECRET ?? "";
+  if (!expected || !safeEqualStrings(secret, expected)) {
     return unauthorized("Cron secret inválido");
   }
 

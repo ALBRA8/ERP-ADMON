@@ -32,23 +32,74 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 local-*
-.claude
-.z-ai-config
+
+# logs
 *.log
 dev.log
 dev.out.log
-test
-prompt
-
 server.log
-# Skills directory
+
+# Skills directory (private)
 /skills/
+
+# Internal agent context (private)
+/agent-ctx/
+
+# Worklog (internal development log, may contain sensitive info)
+worklog.md
+
+# Audit reports (may contain PoCs of vulnerabilities)
+/audit/
+
+# Database files (SQLite with demo data — never commit)
+/db/
+*.db
+*.db-journal
+
+# Cloned reference repos (not part of this project)
+/repo-crm-albra/
+/repo-erp-admon/
+/repo-compare/
+
+# Tool results (private)
+/tool-results/
+
+# Upload directory (user files)
+/upload/
+
+# Download directory (generated artifacts)
+/download/
+
+# Mini services build artifacts
+/mini-services/*/node_modules/
+/mini-services/*/dist/
+
+# PWA session data
+.wa-auth/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+
+# Z.ai internal scripts
+/.zscripts/
+
+# Tool results (private)
+/tool-results/
+
+# Dev server PID
+.zscripts/dev.pid

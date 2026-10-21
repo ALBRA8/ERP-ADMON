@@ -489,6 +489,7 @@ async function main() {
     { codigo: "510515", nombre: "Horas extras y recargos", nivel: 5, naturaleza: "debito" },
     { codigo: "510520", nombre: "Aportes de la empresa (gastos)", nivel: 5, naturaleza: "debito" },
     { codigo: "510525", nombre: "Provisiones de prestaciones sociales", nivel: 5, naturaleza: "debito" },
+    { codigo: "520527", nombre: "Salud patronal (EPS) — 8.5%", nivel: 6, naturaleza: "debito" },
   ];
   for (const c of pucNominaCuentas) {
     const ex = await db.cuentaPuc.findUnique({ where: { codigo: c.codigo } });
@@ -536,7 +537,8 @@ async function main() {
     { codigo: "ICBF_PATRONAL", nombre: "ICBF patronal (3%)", tipo: "aporte_patronal", formula: "ibc * 3% hasta 10 SMMLV", cuentaContableDebito: "510520", cuentaContableCredito: "237020", basePorDefecto: "ibc", porcentaje: 3 },
     { codigo: "CAJA_COMPENSACION", nombre: "Caja de compensación (4%)", tipo: "aporte_patronal", formula: "ibc * 4%", cuentaContableDebito: "510520", cuentaContableCredito: "237030", basePorDefecto: "ibc", porcentaje: 4 },
     { codigo: "SENA_PATRONAL", nombre: "SENA patronal (2%)", tipo: "aporte_patronal", formula: "ibc * 2%", cuentaContableDebito: "510520", cuentaContableCredito: "237025", basePorDefecto: "ibc", porcentaje: 2 },
-    { codigo: "PENSION_PATRONAL", nombre: "Pensión patronal (12%)", tipo: "aporte_patronal", formula: "ibc hasta 10 SMMLV * 12%", cuentaContableDebito: "510520", cuentaContableCredito: "237010", basePorDefecto: "ibc", porcentaje: 12 },
+    { codigo: "PENSION_PATRONAL", nombre: "Pensión patronal (12%)", tipo: "aporte_patronal", formula: "ibc * 12% (sin tope)", cuentaContableDebito: "510520", cuentaContableCredito: "237010", basePorDefecto: "ibc", porcentaje: 12 },
+    { codigo: "SALUD_PATRONAL", nombre: "Salud patronal EPS (8.5%)", tipo: "aporte_patronal", formula: "ibc hasta 10 SMMLV * 8.5%", cuentaContableDebito: "520527", cuentaContableCredito: "237005", basePorDefecto: "ibc", porcentaje: 8.5 },
   ];
   for (const cn of conceptosNomina) {
     const ex = await db.nominaConcepto.findUnique({

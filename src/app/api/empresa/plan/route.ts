@@ -1,10 +1,17 @@
 // ============================================================
 // MARSELLA ERP — API /api/empresa/plan
 // GET : devuelve plan actual + límites + uso actual
-// PUT : solo admin del sistema puede cambiar plan o módulos
+// PUT : solo admin del sistema puede cambiar plan o módulos.
 //        Body: { plan?, modulos?, limiteUsuarios?, limiteTerceros?,
 //                limiteProductos?, limiteFacturasMes?, vigenteHasta?,
 //                estado? }
+//
+// FIX-SEGURIDAD H-CRIT-004: el cambio a plan "enterprise" requiere
+// process.env.SUPER_ADMIN_SECRET en el header X-Super-Admin-Secret.
+// El founder (rol admin de empresa) no puede auto-asignarse
+// enterprise sin ese secret. Cualquier otro plan (free/basic/pro)
+// lo puede cambiar el admin de la empresa (downgrade / reorganización
+// de módulos), pero "enterprise" es gateado por billing externo.
 // ============================================================
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -23,6 +30,8 @@ import {
   auditAction,
   MODULOS_SISTEMA,
 } from "@/lib/tenant";
+import { safeEqualStrings } from "@/lib/crypto";
+import { logWarn } from "@/lib/logger";
 
 // ---------- GET ----------
 export async function GET() {
@@ -65,13 +74,27 @@ export async function PUT(req: NextRequest) {
     const data = parsed.data;
     const empresaId = data.empresaId || session.empresaId;
 
-    // Si la empresa objetivo no es la del usuario, validar que sea admin
-    // del sistema (en SaaS real se validaría rol de superadmin).
-    // Aquí permitimos solo modificar la propia empresa por ahora.
+    // Solo se puede modificar la propia empresa (no cross-tenant).
     if (empresaId !== session.empresaId) {
       return forbidden(
         "No tiene permisos para modificar el plan de otra empresa",
       );
+    }
+
+    // H-CRIT-004: el upgrade a "enterprise" requiere SUPER_ADMIN_SECRET.
+    // El founder (admin de empresa) no puede auto-asignarse enterprise.
+    if (data.plan === "enterprise") {
+      const provided = req.headers.get("x-super-admin-secret") ?? "";
+      const expected = process.env.SUPER_ADMIN_SECRET ?? "";
+      if (!expected || !safeEqualStrings(provided, expected)) {
+        logWarn("intent de upgrade a enterprise sin super-admin secret", {
+          empresaId,
+          userId: session.userId,
+        });
+        return forbidden(
+          "Upgrade a plan 'enterprise' requiere autorización del operador del SaaS (header X-Super-Admin-Secret inválido o ausente).",
+        );
+      }
     }
 
     // Asegurar que exista el registro de plan
@@ -124,6 +147,8 @@ export async function PUT(req: NextRequest) {
         vigenteHasta: data.vigenteHasta,
         estado: data.estado,
       },
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      req.headers.get("user-agent")?.slice(0, 200) ?? null,
     );
 
     return ok(updated);

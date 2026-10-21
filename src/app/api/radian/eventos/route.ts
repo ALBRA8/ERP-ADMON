@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, requirePermission } from "@/lib/auth";
 import {
   ok,
   badRequest,
@@ -10,6 +10,8 @@ import {
   getQuery,
   getQueryInt,
 } from "@/lib/api";
+import { requireCsrf } from "@/lib/csrf";
+import { auditAction } from "@/lib/tenant";
 import {
   TIPOS_EVENTO_RADIAN,
   generarEventoRadianXML,
@@ -92,6 +94,12 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) return unauthorized();
+    // FIX-SEGURIDAD H-CRIT-003: RBAC — dian:write (solo admin puede gestionar eventos Radian).
+    const denied = await requirePermission(session, "dian:write");
+    if (denied) return denied;
+    // FIX-SEGURIDAD H-CRIT-006: CSRF protection.
+    const csrfDenied = await requireCsrf(req);
+    if (csrfDenied) return csrfDenied;
 
     const body = await req.json();
     const { facturaCompraId, tipo, nitEmisor, cufeFactura, terceroId, observaciones } =
@@ -247,6 +255,23 @@ export async function POST(req: NextRequest) {
     const eventoFinal = await db.eventoRadian.findUnique({
       where: { id: evento.id },
     });
+
+    // FIX-SEGURIDAD H-ALT-008: auditar creación de evento Radian.
+    await auditAction(
+      session,
+      "radian_evento_create",
+      "eventoRadian",
+      evento.id,
+      {
+        tipo: String(tipo),
+        numero,
+        nitEmisor: nitEmisorEvento,
+        envioAutomatico: envioResult?.ok,
+        trackId: envioResult?.trackId,
+      },
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+      req.headers.get("user-agent")?.slice(0, 200) ?? null,
+    );
 
     return ok({
       evento: eventoFinal,

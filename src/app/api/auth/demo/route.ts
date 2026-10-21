@@ -1,10 +1,30 @@
 import { ok, serverError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { setSessionCookie, signToken } from "@/lib/auth";
+import { logWarn } from "@/lib/logger";
 
 // Helper para desarrollo: crea empresa + usuario demo y loguea.
+// FIX-SEGURIDAD H-CRIT-001: bloqueado en producción a menos que
+// ENABLE_DEMO_ENDPOINT=true se setee explícitamente.
 export async function POST() {
+  // Guard de entorno: bloquear en producción salvo opt-in explícito.
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ENABLE_DEMO_ENDPOINT !== "true"
+  ) {
+    return new Response(
+      JSON.stringify({ error: "Demo endpoint disabled in production" }),
+      {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
   try {
+    logWarn("demo endpoint invocado", {
+      env: process.env.NODE_ENV,
+      flag: process.env.ENABLE_DEMO_ENDPOINT,
+    });
     const existingEmpresa = await db.empresa.findUnique({
       where: { nit: "900.123.456-7" },
     });

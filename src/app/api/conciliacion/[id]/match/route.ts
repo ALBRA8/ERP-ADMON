@@ -5,16 +5,18 @@ import {
   ok,
   badRequest,
   serverError,
-  unauthorized,
   notFound,
+  withAuth,
+  parseBody,
 } from "@/lib/api";
-import { getSession } from "@/lib/auth";
 
 // ============================================================
 // POST /api/conciliacion/[id]/match
 // Body: { movimientoBancarioId, extractoMovimientoId }
-// Marca ambos como conciliado=true y vincula el movimiento
-// bancario en el ExtractoMovimiento.
+// Marca ambos como conciliado=true y vincula el movimiento bancario
+// en el ExtractoMovimiento. A-CRIT-001: ambas escrituras en
+// $transaction para que sean atómicas (no puede quedar un movimiento
+// marcado como conciliado sin su par).
 // ============================================================
 
 const matchSchema = z.object({
@@ -26,56 +28,65 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  try {
-    const session = await getSession();
-    if (!session) return unauthorized();
-    const { id } = await params;
-    const body = await req.json();
-    const parsed = matchSchema.safeParse(body);
-    if (!parsed.success) {
-      return badRequest("Datos inválidos", parsed.error.flatten());
-    }
-    const d = parsed.data;
+  return withAuth(
+    req,
+    { permission: "bancos:write" },
+    async (session) => {
+      try {
+        const { id } = await params;
+        const parsed = await parseBody(req, matchSchema);
+        if ("error" in parsed) return parsed.error;
+        const d = parsed.data;
 
-    const conc = await db.conciliacionBancaria.findFirst({
-      where: { id, empresaId: session.empresaId },
-    });
-    if (!conc) return notFound("Conciliación no encontrada");
+        const conc = await db.conciliacionBancaria.findFirst({
+          where: { id, empresaId: session.empresaId },
+        });
+        if (!conc) return notFound("Conciliación no encontrada");
 
-    const mov = await db.movimientoBancario.findFirst({
-      where: {
-        id: d.movimientoBancarioId,
-        empresaId: session.empresaId,
-      },
-    });
-    if (!mov) return notFound("Movimiento bancario no encontrado");
+        const mov = await db.movimientoBancario.findFirst({
+          where: {
+            id: d.movimientoBancarioId,
+            empresaId: session.empresaId,
+          },
+        });
+        if (!mov) return notFound("Movimiento bancario no encontrado");
 
-    const extMov = await db.extractoMovimiento.findFirst({
-      where: {
-        id: d.extractoMovimientoId,
-        empresaId: session.empresaId,
-      },
-    });
-    if (!extMov) return notFound("Movimiento de extracto no encontrado");
+        const extMov = await db.extractoMovimiento.findFirst({
+          where: {
+            id: d.extractoMovimientoId,
+            empresaId: session.empresaId,
+          },
+        });
+        if (!extMov)
+          return notFound("Movimiento de extracto no encontrado");
 
-    // Marca ambos como conciliados y los vincula
-    await db.movimientoBancario.update({
-      where: { id: mov.id },
-      data: {
-        conciliado: true,
-        extractoId: extMov.extractoId,
-      },
-    });
-    await db.extractoMovimiento.update({
-      where: { id: extMov.id },
-      data: {
-        conciliado: true,
-        movimientoBancarioId: mov.id,
-      },
-    });
+        // TRANSACCIÓN: marcar ambos como conciliados atómicamente.
+        // Si una escritura falla, ninguna se persiste (A-CRIT-001).
+        await db.$transaction(async (tx) => {
+          await tx.movimientoBancario.update({
+            where: { id: mov.id },
+            data: {
+              conciliado: true,
+              extractoId: extMov.extractoId,
+            },
+          });
+          await tx.extractoMovimiento.update({
+            where: { id: extMov.id },
+            data: {
+              conciliado: true,
+              movimientoBancarioId: mov.id,
+            },
+          });
+        });
 
-    return ok({ ok: true, movimientoBancarioId: mov.id, extractoMovimientoId: extMov.id });
-  } catch (e) {
-    return serverError("Error al conciliar movimientos", e);
-  }
+        return ok({
+          ok: true,
+          movimientoBancarioId: mov.id,
+          extractoMovimientoId: extMov.id,
+        });
+      } catch (e) {
+        return serverError("Error al conciliar movimientos", e);
+      }
+    },
+  );
 }

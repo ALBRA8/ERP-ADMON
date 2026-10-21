@@ -220,12 +220,15 @@ export function calcularDeduccionPension(
 
 // ============================================================
 // 7. Aportes patronales
-//    - ARL: 0.522% a 6.96% según nivel de riesgo (sobre IBC)
-//    - ICBF: 3% sobre IBC hasta 10 SMMLV
-//    - Caja de compensación: 4% sobre IBC
-//    - SENA: 2% sobre IBC (exonerado si < 10 SMMLV en some regímenes)
-//    - Pensión patronal: 12% sobre 10 SMMLV (piso)
-//    (Simplificado: aplicamos SENA e ICBF sobre el IBC completo)
+//    - ARL: 0.522% a 6.96% según nivel de riesgo (sobre IBC, SIN tope)
+//    - ICBF: 3% sobre IBC hasta 10 SMMLV (CON tope)
+//    - Caja de compensación: 4% sobre IBC (SIN tope)
+//    - SENA: 2% sobre IBC hasta 10 SMMLV (CON tope)
+//    - Pensión patronal: 12% sobre IBC (SIN tope)
+//    - Salud patronal (EPS): 8.5% sobre IBC hasta 10 SMMLV (CON tope)
+//    Base imponible topada a 10 SMMLV: ICBF, SENA, Salud patronal.
+//    Base imponible completa (sin tope): ARL, Caja, Pensión patronal.
+//    Ley 1607/2012 (exoneración) y Decreto 2150/2017.
 // ============================================================
 export interface AportesPatronalesResult {
   arl: number;
@@ -233,6 +236,7 @@ export interface AportesPatronalesResult {
   caja: number;
   sena: number;
   pensionPatronal: number;
+  saludPatronal: number;
   total: number;
 }
 
@@ -242,20 +246,34 @@ export function calcularAportesPatronales(
 ): AportesPatronalesResult {
   const base = Number.isFinite(ibc) && ibc > 0 ? ibc : 0;
   const tope10SMMLV = 10 * SMMLV_2026;
-  // ARL sobre el IBC
+  // Base topada a 10 SMMLV para ICBF, SENA y Salud patronal
+  const baseTope = Math.min(base, tope10SMMLV);
+  // ARL sobre el IBC (sin tope)
   const arlTasa = ARL_PORCENTAJES[arlRiesgo] ?? ARL_PORCENTAJES[1];
   const arl = round(base * (arlTasa / 100), 2);
   // ICBF 3% sobre IBC hasta 10 SMMLV
-  const baseIcbf = Math.min(base, tope10SMMLV);
-  const icbf = round(baseIcbf * 0.03, 2);
-  // Caja 4% sobre IBC
+  const icbf = round(baseTope * 0.03, 2);
+  // Caja 4% sobre IBC (sin tope)
   const caja = round(base * 0.04, 2);
-  // SENA 2% sobre IBC (simplificación: aplicamos siempre)
-  const sena = round(base * 0.02, 2);
-  // Pensión patronal 12% sobre el IBC hasta 10 SMMLV (piso ARL)
-  const pensionPatronal = round(Math.min(base, tope10SMMLV) * 0.12, 2);
-  const total = round(arl + icbf + caja + sena + pensionPatronal, 2);
-  return { arl, icbf, caja, sena, pensionPatronal, total };
+  // SENA 2% sobre IBC hasta 10 SMMLV
+  const sena = round(baseTope * 0.02, 2);
+  // Pensión patronal 12% sobre el IBC (SIN tope)
+  const pensionPatronal = round(base * 0.12, 2);
+  // Salud patronal (EPS) 8.5% sobre IBC hasta 10 SMMLV
+  const saludPatronal = round(baseTope * 0.085, 2);
+  const total = round(
+    arl + icbf + caja + sena + pensionPatronal + saludPatronal,
+    2,
+  );
+  return {
+    arl,
+    icbf,
+    caja,
+    sena,
+    pensionPatronal,
+    saludPatronal,
+    total,
+  };
 }
 
 // ============================================================
@@ -263,7 +281,8 @@ export function calcularAportesPatronales(
 //    - Cesantías: 8.33% sobre devengado constitutivo
 //    - Intereses de cesantías: 1% anual sobre cesantías (12%)
 //    - Prima: 8.33% sobre devengado constitutivo
-//    - Vacaciones: 4.17% sobre el salario (no incluye extras)
+//    - Vacaciones: 4.17% sobre el SALARIO BÁSICO (no incluye extras
+//      ni recargos — art. 306 CST). Base = salario por días.
 // ============================================================
 export interface ProvisionesResult {
   cesantias: number;
@@ -277,10 +296,19 @@ export function calcularProvisiones(
   devengadoConstitutivo: number,
   diasLaborados: number,
   diasMes = 30,
+  salarioBasico?: number,
 ): ProvisionesResult {
   const base = Number.isFinite(devengadoConstitutivo)
     ? devengadoConstitutivo
     : 0;
+  // Vacaciones: base = salario básico (sin HE/recargos).
+  // Si no se proporciona salarioBasico, se usa devengadoConstitutivo
+  // como fallback (backward-compat).
+  const baseVacaciones =
+    Number.isFinite((salarioBasico as number) ?? undefined) &&
+    (salarioBasico ?? 0) > 0
+      ? (salarioBasico as number)
+      : base;
   // Base proporcional al período (ej: si eran 30 días, base completa; si 15, mitad)
   const factor = diasMes > 0 ? diasLaborados / diasMes : 0;
   // Cesantías: 8.33% (1 año de salario por año trabajado = 8.33% mensual acumulado)
@@ -289,10 +317,8 @@ export function calcularProvisiones(
   const interesesCesantias = round(base * 0.01 * factor, 2);
   // Prima: 8.33% (un salario por año = 8.33% mensual)
   const prima = round(base * 0.0833 * factor, 2);
-  // Vacaciones: 4.17% (medio salario por año = 4.17% mensual)
-  // Las vacaciones se calculan sobre el salario base, sin extras ni auxilios.
-  // Aquí simplificamos usando la misma base.
-  const vacaciones = round(base * 0.0417 * factor, 2);
+  // Vacaciones: 4.17% (medio salario por año = 4.17% mensual) sobre salario básico
+  const vacaciones = round(baseVacaciones * 0.0417 * factor, 2);
   const total = round(cesantias + interesesCesantias + prima + vacaciones, 2);
   return { cesantias, interesesCesantias, prima, vacaciones, total };
 }
@@ -457,11 +483,17 @@ export function liquidarEmpleado(
     { codigo: "CAJA_COMPENSACION", nombre: "Caja de compensación 4%", valor: aportes.caja },
     { codigo: "SENA_PATRONAL", nombre: "SENA patronal 2%", valor: aportes.sena },
     { codigo: "PENSION_PATRONAL", nombre: "Pensión patronal 12%", valor: aportes.pensionPatronal },
+    { codigo: "SALUD_PATRONAL", nombre: "Salud patronal (EPS) 8.5%", valor: aportes.saludPatronal },
   ];
   const totalAportesPatronales = round(aportes.total, 2);
 
-  // Provisiones
-  const prov = calcularProvisiones(devengadoConstitutivo, empleado.diasLaborados);
+  // Provisiones — vacaciones sobre salario básico (sin HE/recargos)
+  const prov = calcularProvisiones(
+    devengadoConstitutivo,
+    empleado.diasLaborados,
+    30,
+    salarioPorDias,
+  );
   const provisiones: ConceptoLinea[] = [
     { codigo: "CESANTIAS", nombre: "Cesantías 8.33%", valor: prov.cesantias },
     { codigo: "INTERESES_CESANTIAS", nombre: "Intereses cesantías 1%", valor: prov.interesesCesantias },

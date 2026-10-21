@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
     const baseUrl = `${proto}://${host}/api/mcp`;
 
     const tokenConfigured = !!process.env.MCP_API_TOKEN;
-    const isAdmin = session.rol === "admin";
+    // FIX-SEGURIDAD H-ALT-005: el token no se expone a ningún usuario
+    // (ni siquiera admin) vía esta API. Solo indicamos si está configurado.
 
     const pythonSnippet = `from mcp import Client
 from mcp.client.streamable_http import streamablehttp
@@ -71,10 +72,14 @@ await client.close();`;
       auth: {
         mode: "bearer",
         tokenConfigured,
-        token: isAdmin && tokenConfigured ? process.env.MCP_API_TOKEN : undefined,
+        // FIX-SEGURIDAD H-ALT-005: NO exponer el token MCP real.
+        // Solo indicar si está configurado. El operador debe
+        // obtener el token por canales seguros (variables de
+        // entorno, gestor de secretos) y nunca vía API.
+        token: undefined,
         jwtSupported: true,
         description:
-          "Envía 'Authorization: Bearer <TOKEN>' en cada request. El token puede ser el fijo (MCP_API_TOKEN) o un JWT de sesión del ERP.",
+          "Envía 'Authorization: Bearer <TOKEN>' en cada request. El token puede ser el fijo (MCP_API_TOKEN, configurado por el operador del SaaS vía variables de entorno) o un JWT de sesión del ERP. Por seguridad, el token no se expone vía esta API.",
       },
       resources: MCP_RESOURCES_INFO,
       tools: MCP_TOOLS_INFO,

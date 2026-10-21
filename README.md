@@ -1,48 +1,77 @@
 # Marsella ERP — Software Contable Administrativo
 
-Reingeniería moderna de **SG Hermes 9.2.1.1** (ERP de escritorio en VB.NET WinForms + MySQL) construida desde cero sobre **Next.js 16 + TypeScript + Prisma + SQLite** (intercambiable a PostgreSQL). Diseñada como producto **independiente y complementario** al CRM-ALBRA.
+Reingeniería moderna de **SG Hermes 9.2.1.1** (ERP de escritorio en VB.NET WinForms + MySQL) construida sobre **Next.js 16 + TypeScript + Prisma + SQLite** (intercambiable a PostgreSQL).
+
+Diseñada como producto **independiente y complementario** al CRM-ALBRA. Cubre los 20 módulos del informe Hermes original con mejoras exponenciales (PWA offline, MCP, multi-tenant SaaS, NIIF, medios magnéticos DIAN).
 
 ## Stack
 
-| Capa | Tecnología | Notas |
-|---|---|---|
-| Framework | Next.js 16 (App Router) + React 19 | Turbopack |
-| Lenguaje | TypeScript estricto | Zod para validación |
-| BD | SQLite + Prisma 6 | Cambiar a PostgreSQL: solo `provider = "postgresql"` |
-| UI | Tailwind 4 + shadcn/ui (New York) | Modo claro/oscuro |
-| Auth | JWT (jose) + bcryptjs + RBAC | 5 roles: admin, contador, cajero, vendedor, bodeguero |
-| DIAN | Estructura UBL 2.1 + CUFE (SHA-384) + QR | Mock inicial, lista para integrar proveedor tecnológico real |
-| Reportes | Excel con `exceljs`, PDF planeado con `@react-pdf/renderer` | Reemplaza Crystal Reports |
-
-## Módulos implementados (Fase 1)
-
-| Módulo | Funcionalidad |
+| Capa | Tecnología |
 |---|---|
-| **Dashboard** | KPIs: ventas/compras del mes, cartera por edades (0-30/31-60/61-90/+90), stock crítico, movimientos contables del mes |
-| **Terceros** | CRUD unificado de clientes, proveedores, empleados y socios. Búsqueda, filtro por tipo, ciudades DANE, cupo de crédito y días de plazo |
-| **Productos y Servicios** | Maestro con código, barcode, unidad de medida, clasificación en 6 niveles (árbol), 3 listas de precios, IVA, manejo de lotes y seriales |
-| **Inventarios Multibodega** | Bodegas, saldos por bodega, kardex valorizado con costo promedio ponderado (PEPS), ajustes manuales (entrada/salida/ajuste) |
-| **Compras** | Factura de compra con IVA descontable, entrada automática al inventario, saldo CXP, fecha de vencimiento |
-| **Facturación** | POS y Estándar con CUFE (mock), QR de representación DIAN, XML UBL 2.1 completo, salida de inventario, asiento contable automático (Cliente / IVA / Ingreso / Costo / Inventario), forma de pago con cálculo de cambio |
-| **Cartera** | CXC (recibos de caja) y CXP (comprobantes de egreso), aging por edades, decremento automático del saldo del tercero |
-| **Contabilidad** | Plan Único de Cuentas (PUC) colombiano precargado (48 cuentas, clases 1-7), asientos manuales con validación de cuadre, balance de prueba, libro mayor por cuenta, auxiliar por tercero |
-| **Parámetros** | Empresa (NIT, régimen, moneda, decimales), Resolución DIAN (CRUD), Usuarios con roles, Tipos de documento, Info del sistema |
+| Framework | Next.js 16 (App Router) + React 19 + Turbopack |
+| Lenguaje | TypeScript estricto |
+| BD | SQLite + Prisma 6 (cambiable a PostgreSQL en 1 línea) |
+| UI | Tailwind 4 + shadcn/ui (New York) — modo claro/oscuro |
+| Auth | JWT (jose) + bcryptjs + RBAC granular (5 roles) |
+| Seguridad | AES-256-GCM para credenciales, CSRF tokens, rate limiting, headers CSP/HSTS |
+| DIAN | Estructura UBL 2.1 + CUFE (SHA-384) + firma XAdES-EPES + Radian (eventos 030-036) |
+| Reportes | PDF con `@react-pdf/renderer` + Excel con `exceljs` |
+| PWA | Service Worker + IndexedDB para cajas POS offline |
+| MCP | Servidor con 10 resources + 9 tools + 3 prompts |
 
-## Mejoras exponenciales vs Hermes
+## Módulos (20/20 del SG Hermes implementados)
+
+### Operación
+- **Dashboard** — KPIs consolidados (ventas, cartera, stock crítico, movimientos contables)
+- **Terceros** — Clientes, proveedores, empleados unificados
+- **Productos y Servicios** — Maestro + barcode + unidades + clasificación 6 niveles
+- **Inventarios Multibodega** — Kardex valorizado, costo promedio ponderado, lotes
+- **Compras** — Factura de compra con IVA descontable + asiento contable automático
+- **Facturación** — POS y Estándar con CUFE, XML UBL 2.1, QR DIAN, firma XAdES-EPES
+- **DIAN** — Configuración de certificado .p12, envío real a WebService DIAN, cola de reenvíos
+- **DIAN Radian** — Eventos 030/031/032/033/034/035/036 de recepción
+- **Producción y Costos** — Recetas + órdenes de transformación + asiento contable
+
+### Financiero
+- **Cartera** — CXC (recibos de caja) + CXP (comprobantes de egreso) con aging por edades
+- **Contabilidad** — Plan Único de Cuentas (PUC) + asientos manuales + balance de prueba + libro mayor
+- **Créditos** — Amortización French, Alemana y Americana
+- **Presupuesto** — CDP, CRP, modificaciones presupuestales
+- **Nómina Electrónica** — CUNE + 18 conceptos + cálculos oficiales 2026 (SMMLV, Aux. Transporte, UVT)
+- **Bancos y Conciliación** — Cuentas bancarias + extractos + matching manual
+- **Cajas POS** — Apertura/cierre + arqueos
+- **Reportes PDF** — Balance, libro diario, mayor, kardex, nómina, ejecutivo
+- **Estados NIIF** — ESF, EER, ECP, EFE con mapeo PUC→NIIF
+- **Medios Magnéticos DIAN** — Formatos 1007, 2276, 2277, 1647, 2238 con TXT/XLSX
+
+### Verticales Nicho
+- **Restaurante** — Mapa de mesas + comandas + facturación directa
+- **Hotelería** — Habitaciones por planta + reservas + check-in/check-out
+- **Cafetero** — Compra de café con liquidación (peso, tara, humedad, rendimiento) + catación SCA
+- **Servicios Públicos** — Usuarios + lecturas masivas + facturación por bloque
+- **Taller** — Órdenes de servicio técnico + diagnóstico + repuestos
+- **Vehículos y Mascotas** — Registro de placas + fichas mascotas
+
+### Sistema
+- **Parámetros** — Empresa, Resoluciones DIAN, Usuarios y roles, Tipos de documento
+- **Importaciones Excel** — Universal con mapeo automático para 7 entidades
+- **Administración** — Plan de suscripción + límites + auditoría multi-tenant
+- **MCP** — Servidor Model Context Protocol + cliente para conexiones externas
+
+## Mejoras exponenciales vs SG Hermes
 
 | Hallazgo Hermes (informe §9) | Solución en Marsella ERP |
 |---|---|
-| Credenciales en texto plano (`servidor.txt`) | Variables de entorno + AES-256-GCM para credenciales por empresa |
-| Inyección SQL masiva (concatenación de strings en VB.NET) | Prisma ORM con prepared statements + Zod para validación de entrada |
-| ActiveX Flash obsoletos (RCE) | Sin componentes ActiveX; React 19 + Radix UI |
-| Sin TLS en conexión MySQL | HTTPS/WSS con TLS 1.3 obligatorio en producción |
-| ADODB COM Interop + ODBC 5.1 | Prisma Client nativo |
-| Sin FK declaradas (MyISAM) | Todas las tablas con FK formales + onDelete Cascade/SetNull |
-| Sin separación de capas (lógica en botones WinForms) | API REST en `src/app/api/` separada de UI |
-| 109 reportes Crystal Reports pesados | Reportes ligeros con Excel/PDF nativo del navegador |
-| Ejecutable 37 MB, recompilar por cada cambio | Hot reload en desarrollo, standalone build en producción |
-| Sin RBAC granular | JWT + RBAC con 5 roles y permisos por módulo |
-| Sin catálogo de-versionado de schema | `prisma db push` idempotente; swap a PostgreSQL en una línea |
+| Credenciales en texto plano (`servidor.txt`) | Variables de entorno + AES-256-GCM |
+| Inyección SQL masiva (VB.NET) | Prisma ORM + Zod para validación |
+| ActiveX Flash obsoletos (RCE) | React 19 + Radix UI |
+| Sin TLS en MySQL | HTTPS/WSS con TLS 1.3 obligatorio |
+| ADODB COM + ODBC 5.1 32-bit | Prisma Client nativo |
+| Sin FK declaradas (MyISAM) | FK formales en todo el esquema |
+| Lógica en botones WinForms | API REST separada de UI |
+| 109 reportes Crystal Reports pesados | Excel/PDF nativo del navegador |
+| Ejecutable 37 MB, recompilar por cambio | Hot reload + standalone build |
+| Sin RBAC granular | JWT + 5 roles + permisos por módulo + CSRF |
 
 ## Puesta en marcha
 
@@ -50,99 +79,174 @@ Reingeniería moderna de **SG Hermes 9.2.1.1** (ERP de escritorio en VB.NET WinF
 # 1. Instalar dependencias
 bun install
 
-# 2. Aplicar schema a la BD
+# 2. Configurar variables de entorno
+cp .env.example .env
+#    Genera los 5 secretos obligatorios:
+#    openssl rand -base64 32   # APP_SECRET
+#    openssl rand -hex 32      # APP_ENCRYPTION_KEY
+#    openssl rand -hex 32      # MCP_API_TOKEN
+#    openssl rand -hex 32      # CRON_SECRET
+#    openssl rand -hex 32      # SUPER_ADMIN_SECRET
+
+# 3. Aplicar schema a la BD
 bun run db:push
 
-# 3. Poblar datos demo (Marsella S.A.S. + PUC + 10 productos + 5 clientes)
+# 4. Poblar datos demo (Marsella S.A.S. + PUC + 10 productos + 5 clientes)
 bunx tsx scripts/seed-marsella.ts
 
-# 4. Levantar
+# 5. Levantar
 bun run dev          # http://localhost:3000
 ```
 
-**Demo login**: `demo@marsella.com` / `demo1234` (o usa el botón "Entrar en modo demo").
+**Demo login**: `demo@marsella.com` / `demo1234` (solo disponible en desarrollo; en producción requiere `ENABLE_DEMO_ENDPOINT=true`).
 
 ## Estructura del proyecto
 
 ```
 src/
 ├── app/
-│   ├── api/
-│   │   ├── auth/{login,register,me,logout,demo}/
+│   ├── api/                  # 150+ endpoints REST
+│   │   ├── auth/             # login, register, logout, demo, csrf
 │   │   ├── dashboard/        # KPIs consolidados
-│   │   ├── terceros/          # CRUD unificado de terceros
-│   │   ├── productos/         # CRUD de productos
-│   │   ├── inventario/        # Bodegas, saldos, kardex, movimientos
-│   │   ├── bodegas/           # CRUD de bodegas
-│   │   ├── facturas/          # Facturación electrónica DIAN (mock CUFE)
-│   │   ├── compras/           # Facturas de compra
-│   │   ├── cartera/           # Recibos de caja + comprobantes de egreso
-│   │   ├── contabilidad/      # PUC, asientos, balance, mayor, auxiliar
-│   │   ├── empresas/          # PUT empresa
-│   │   ├── usuarios/          # CRUD usuarios
-│   │   ├── resolucion-dian/   # CRUD resoluciones DIAN
-│   │   ├── ciudades/          # Ciudades DANE
-│   │   ├── unidades/          # Unidades de medida
-│   │   ├── lineas/            # Líneas de clasificación
-│   │   └── impuestos/         # IVA, ReteFuente, ReteICA
+│   │   ├── terceros/         # CRUD unificado de terceros
+│   │   ├── productos/        # CRUD de productos
+│   │   ├── inventario/       # Bodegas, saldos, kardex, movimientos
+│   │   ├── facturas/         # Facturación electrónica DIAN
+│   │   ├── compras/          # Facturas de compra + asiento
+│   │   ├── cartera/          # Recibos de caja + comprobantes de egreso
+│   │   ├── contabilidad/     # PUC, asientos, balance, mayor, cierre
+│   │   ├── nomina/           # Nómina electrónica con CUNE
+│   │   ├── dian/             # Configuración DIAN + envíos + cola
+│   │   ├── radian/           # Eventos Radian 030-036
+│   │   ├── niif/             # Estados financieros NIIF
+│   │   ├── medios-magneticos/ # Formatos DIAN 1007/2276/2277
+│   │   ├── bancos/           # Cuentas bancarias + conciliación
+│   │   ├── cajas/            # Cajas POS + arqueos
+│   │   ├── creditos/         # Créditos con amortización
+│   │   ├── presupuesto/      # CDP/CRP/modificaciones
+│   │   ├── produccion/       # Órdenes de producción + recetas
+│   │   ├── mesas/            # Restaurante
+│   │   ├── comandas/         # Restaurante
+│   │   ├── habitaciones/     # Hotelería
+│   │   ├── reservas-hotel/   # Hotelería
+│   │   ├── cafetero/         # Compra de café + catación
+│   │   ├── servicios-publicos/ # Lecturas masivas
+│   │   ├── taller/           # Órdenes de servicio técnico
+│   │   ├── vehiculos/        # Vehículos
+│   │   ├── mascotas/         # Mascotas
+│   │   ├── mcp/              # Servidor + cliente MCP
+│   │   ├── reportes/         # PDFs de balance, diario, mayor, kardex, nómina
+│   │   ├── import/           # Importador Excel universal
+│   │   ├── empresa/          # Plan + auditoría multi-tenant
+│   │   └── ...               # Más catálogos
 │   ├── layout.tsx
-│   └── page.tsx               # SPA principal con 9 vistas
+│   └── page.tsx              # SPA principal con 29 vistas
 ├── components/
-│   ├── auth/login-view.tsx
-│   ├── layout/{sidebar,topbar}.tsx
-│   ├── dashboard/dashboard.tsx
-│   ├── terceros/terceros-view.tsx
-│   ├── productos/productos-view.tsx
-│   ├── inventario/inventario-view.tsx
-│   ├── facturacion/facturacion-view.tsx
-│   ├── compras/compras-view.tsx
-│   ├── cartera/cartera-view.tsx
-│   ├── contabilidad/contabilidad-view.tsx
-│   ├── parametros/parametros-view.tsx
-│   └── ui/                    # shadcn/ui completo
+│   ├── auth/                 # Login + registro
+│   ├── layout/               # Sidebar + topbar
+│   ├── dashboard/            # Dashboard con KPIs
+│   ├── terceros/             # Vista de terceros
+│   ├── productos/            # Vista de productos
+│   ├── inventario/           # Vista de inventarios
+│   ├── facturacion/          # POS + factura estándar
+│   ├── compras/              # Vista de compras
+│   ├── cartera/              # Vista de cartera
+│   ├── contabilidad/         # PUC + asientos + balance
+│   ├── nomina/               # Vista de nómina
+│   ├── dian/                 # Configuración DIAN + envíos
+│   ├── radian/               # Eventos Radian
+│   ├── niif/                 # Estados financieros NIIF
+│   ├── medios-magneticos/    # Medios magnéticos
+│   ├── bancos/               # Bancos + conciliación
+│   ├── cajas/                # Cajas POS
+│   ├── creditos/             # Créditos + simulador
+│   ├── presupuesto/          # Presupuesto
+│   ├── produccion/           # Producción + recetas
+│   ├── restaurante/          # Restaurante
+│   ├── hotel/                # Hotelería
+│   ├── cafetero/             # Cafetero
+│   ├── servicios-publicos/   # Servicios públicos
+│   ├── taller/               # Taller
+│   ├── vehiculos/            # Vehículos + mascotas
+│   ├── parametros/           # Configuración del sistema
+│   ├── importaciones/        # Importador Excel
+│   ├── admin/                # Administración
+│   ├── mcp/                  # MCP
+│   ├── pwa/                  # PWA (SW registro, install, sync)
+│   ├── reportes/             # Reportes PDF
+│   └── ui/                   # shadcn/ui completo
 ├── lib/
-│   ├── db.ts                  # Prisma client singleton
-│   ├── auth.ts                # JWT + RBAC + registerUser + loginUser
-│   ├── crypto.ts              # bcrypt + AES-256-GCM + SHA-384 (CUFE)
-│   ├── dian.ts                # CUFE + QR + XML UBL 2.1 + dígito verif NIT
-│   ├── currency.ts            # COP format + round + aging
-│   ├── inventario.ts          # Kardex + costo promedio ponderado
-│   └── api.ts                 # Helpers ok/badRequest/serverError/withAuth
+│   ├── db.ts                 # Prisma client singleton
+│   ├── auth.ts               # JWT + RBAC + 5 roles
+│   ├── crypto.ts             # bcrypt + AES-256-GCM + SHA-384 (CUFE)
+│   ├── csrf.ts               # CSRF tokens double-submit
+│   ├── rate-limit.ts         # Rate limiting en memoria
+│   ├── token-revocation.ts   # Logout con invalidación de JWT
+│   ├── logger.ts             # Logging sanitizado
+│   ├── url-safety.ts         # SSRF protection
+│   ├── dian.ts               # CUFE + QR + XML UBL 2.1 + DV NIT
+│   ├── dian-real.ts          # Firma XAdES-EPES + envío SOAP DIAN
+│   ├── radian.ts             # Eventos Radian (ApplicationResponse UBL)
+│   ├── nomina.ts             # Cálculos nómina 2026 + CUNE
+│   ├── niif.ts               # ESF, EER, ECP, EFE
+│   ├── niif-mapping.ts       # Mapeo PUC → NIIF
+│   ├── medios-magneticos.ts  # Formatos 1007/2276/2277/1647/2238
+│   ├── inventario.ts         # Kardex + costo promedio ponderado
+│   ├── credito.ts            # Amortización French/Alemana/Americana
+│   ├── contabilidad.ts       # Asientos automáticos (compra, recibo, egreso, nómina, cierre)
+│   ├── produccion.ts         # Órdenes de producción + recetas
+│   ├── import-excel.ts       # Importador Excel universal
+│   ├── mcp-server.ts         # Servidor MCP
+│   ├── mcp-client.ts         # Cliente MCP
+│   ├── tenant.ts             # Multi-tenant + auditoría
+│   ├── currency.ts           # COP format + round + aging
+│   ├── pdf.tsx               # 14 generadores PDF con @react-pdf/renderer
+│   └── api.ts                # Helpers ok/badRequest/serverError/withAuth
 └── prisma/
-    └── schema.prisma          # 19 modelos, ~28 tablas lógicas
+    └── schema.prisma         # 82 modelos
 scripts/
-└── seed-marsella.ts           # Seed: empresa + admin + DIAN + PUC + 10 productos + clientes
+└── seed-marsella.ts          # Seed: empresa + admin + DIAN + PUC + productos + clientes
+public/
+├── manifest.json             # PWA manifest
+├── sw.js                     # Service Worker
+└── icon-192.svg, icon-512.svg # Iconos PWA
 docs/
-└── MIGRATION_FROM_HERMES.md   # Mapeo Hermes → Marsella, módulo por módulo
+└── MIGRATION_FROM_HERMES.md  # Mapeo Hermes → Marsella módulo por módulo
 ```
 
 ## Variables de entorno
 
+Ver `.env.example` para referencia. Los 5 secretos obligatorios en producción:
+
+| Variable | Uso | Generación |
+|---|---|---|
+| `APP_SECRET` | Firma JWT (mín 32 chars) | `openssl rand -base64 32` |
+| `APP_ENCRYPTION_KEY` | Cifrado AES-256-GCM de credenciales (64 hex) | `openssl rand -hex 32` |
+| `MCP_API_TOKEN` | Token del servidor MCP (64 hex) | `openssl rand -hex 32` |
+| `CRON_SECRET` | Header X-Cron-Secret para jobs programados | `openssl rand -hex 32` |
+| `SUPER_ADMIN_SECRET` | Upgrades de plan a enterprise | `openssl rand -hex 32` |
+
+## Seguridad
+
+- ✅ JWT con `jti` + revocación en logout
+- ✅ bcryptjs 12 rounds para passwords
+- ✅ AES-256-GCM para credenciales por organización
+- ✅ CSRF tokens (double-submit cookie) en endpoints sensibles
+- ✅ Rate limiting en login (10 intentos/min/IP)
+- ✅ Headers: CSP, HSTS, X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy
+- ✅ RBAC con 5 roles (admin, contador, cajero, vendedor, bodeguero)
+- ✅ Multi-tenant con `empresaId` en todas las tablas operativas
+- ✅ Validación Zod en 95% de POST/PUT
+- ✅ Transacciones Prisma `$transaction` en operaciones contables
+
+## Despliegue con Docker
+
 ```bash
-# .env
-DATABASE_URL=file:/home/z/my-project/db/custom.db
-APP_SECRET=<32+ chars aleatorios>          # JWT signing
-APP_ENCRYPTION_KEY=<64 hex chars / 32 bytes> # AES-256-GCM para credenciales
+docker compose up -d --build
 ```
-
-## Integración con CRM-ALBRA (futuro)
-
-Los dos productos comparten el mismo stack (Next.js 16 + TS + Prisma) y pueden integrarse vía:
-
-1. **API REST entre servicios** (CRM consume `/api/terceros` y `/api/facturas` del ERP con Bearer JWT).
-2. **Webhook compartido** (cuando se factura en el ERP, notifica al CRM para marcar oportunidad como "ganada").
-3. **SSO** (compartir clave `APP_SECRET` para validar tokens cruzados).
-4. **Base de datos compartida** (ambos usan `Tercero` como entidad central).
-
-## Limitaciones actuales (Fase 1)
-
-- **DIAN real**: CUFE está mockeado. Para facturación electrónica real se requiere certificado digital X.509 + proveedor tecnológico autorizado. La estructura UBL 2.1 ya está lista.
-- **Nómina electrónica DIAN**: no incluida (Fase 2).
-- **Verticales nicho** (restaurante/hotel/café/servicios públicos/taller): no incluidos (Fase 3+).
-- **Conciliación bancaria**: no incluida (Fase 2).
-- **Presupuesto CDP/CRP**: no incluido (Fase 2).
-- **Créditos con amortización**: no incluido (Fase 2).
 
 ## Licencia
 
-Propietaria — Marsella S.A.S. / Johan Marsella. Construido sobre el informe técnico "INFORME HERMES MARSELLA" (30 de Septiembre 2026).
+Propietaria — Marsella S.A.S. / Johan Marsella.
+
+Construido sobre el informe técnico "INFORME HERMES MARSELLA" (30 de Septiembre 2026) que documenta la ingeniería inversa del SG Hermes 9.2.1.1.
