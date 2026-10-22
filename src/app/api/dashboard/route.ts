@@ -49,8 +49,8 @@ export async function GET() {
       select: { total: true },
     });
 
-    const ventasMes = facturasMes.reduce((a, f) => a + f.total, 0);
-    const ventasMesPasado = facturasMesPasado.reduce((a, f) => a + f.total, 0);
+    const ventasMes = facturasMes.reduce((a, f) => a + Number(f.total), 0);
+    const ventasMesPasado = facturasMesPasado.reduce((a, f) => a + Number(f.total), 0);
     const numFacturasMes = facturasMes.length;
 
     // Cartera pendiente
@@ -65,7 +65,7 @@ export async function GET() {
         fechaVencimiento: true,
       },
     });
-    const carteraTotal = cartera.reduce((a, c) => a + c.saldoPendiente, 0);
+    const carteraTotal = cartera.reduce((a, c) => a + Number(c.saldoPendiente), 0);
 
     const hoy = new Date();
     let carteraVencida = 0;
@@ -79,11 +79,12 @@ export async function GET() {
         (hoy.getTime() - c.fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24),
       );
       if (dias <= 0) continue; // no vencida
-      if (dias <= 30) cartera30 += c.saldoPendiente;
-      else if (dias <= 60) cartera60 += c.saldoPendiente;
-      else if (dias <= 90) cartera90 += c.saldoPendiente;
-      else carteraMas90 += c.saldoPendiente;
-      carteraVencida += c.saldoPendiente;
+      const saldo = Number(c.saldoPendiente);
+      if (dias <= 30) cartera30 += saldo;
+      else if (dias <= 60) cartera60 += saldo;
+      else if (dias <= 90) cartera90 += saldo;
+      else carteraMas90 += saldo;
+      carteraVencida += saldo;
     }
 
     // Stock crítico: productos con saldo < stockMinimo
@@ -102,8 +103,8 @@ export async function GET() {
         id: p.id,
         codigo: p.codigo,
         nombre: p.nombre,
-        stockTotal: p.saldosInventario.reduce((a, s) => a + s.cantidad, 0),
-        stockMinimo: p.stockMinimo,
+        stockTotal: p.saldosInventario.reduce((a, s) => a + Number(s.cantidad), 0),
+        stockMinimo: Number(p.stockMinimo),
       }))
       .filter((p) => p.stockTotal <= p.stockMinimo);
 
@@ -158,12 +159,12 @@ export async function GET() {
         cartera90,
         carteraMas90,
         productosCriticosCount: productosCriticos.length,
-        comprasMes: comprasMes._sum.total ?? 0,
+        comprasMes: Number(comprasMes._sum.total ?? 0),
         totalProductos,
         totalClientes,
         totalProveedores,
-        totalDebitosMes: contaMovs._sum.debito ?? 0,
-        totalCreditosMes: contaMovs._sum.credito ?? 0,
+        totalDebitosMes: Number(contaMovs._sum.debito ?? 0),
+        totalCreditosMes: Number(contaMovs._sum.credito ?? 0),
       },
       stockCritico: productosCriticos.slice(0, 10),
     });
