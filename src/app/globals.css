@@ -121,23 +121,7 @@
   }
 }
 
-/* Ocultar el badge "N" de Next.js DevTools que estorba en el sidebar */
-nextjs-portal,
-[data-nextjs-dev-tools-button],
-[data-nextjs-toast-wrapper],
-#nextjs__container_errors__,
-nextjs-dev-tools-button,
-.__next-devtools-badge,
-button[aria-label*="Next.js"],
-button[aria-label*="Open Next.js"],
-div[class*="nextjs-dev-tools"],
-div[class*="next-devtools"],
-nextjs-devtools-badge {
+/* Ocultar SOLO el badge flotante "N" de Next.js DevTools */
+nextjs-dev-tools-button {
   display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-  opacity: 0 !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
 }
