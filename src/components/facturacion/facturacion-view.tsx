@@ -686,7 +686,17 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
 
   // Offline / PWA
   const offline = useOfflinePos();
-  const { isOnline, cachedProducts, cachedClients } = offline;
+  // B3 (N+1 requests): desestructuramos los métodos estables del hook
+  // (cacheClients/cacheProducts son useCallback con [] en useOfflinePos)
+  // para NO depender del objeto `offline` completo, que cambia ref en
+  // cada render del hook y disparaba el useEffect de carga 8+ veces.
+  const {
+    isOnline,
+    cachedProducts,
+    cachedClients,
+    cacheClients: idbCacheClients,
+    cacheProducts: idbCacheProducts,
+  } = offline;
 
   // Form state
   const [clienteSel, setClienteSel] = useState<Tercero | null>(null);
@@ -726,6 +736,10 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
   // ---------- Carga catálogos ----------
   // Cuando hay conexión, descarga y cachea en IndexedDB (offline-first).
   // Cuando está offline, usa la cache local.
+  // B3: flag con useRef para evitar re-fetches en la misma instancia del
+  // componente (el useEffect se dispara 8+ veces porque las callbacks
+  // cambiaban de ref; con este guard nos aseguramos de cargar una sola vez).
+  const catalogosLoadedRef = useRef(false);
   const cargarClientes = useCallback(async () => {
     if (!isOnline) {
       setClientes(cachedClients as unknown as Tercero[]);
@@ -738,7 +752,7 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
       const items = (d.items ?? []) as Tercero[];
       setClientes(items);
       // Cachea para uso offline
-      await offline.cacheClients();
+      await idbCacheClients();
     } catch (e: any) {
       // Si falla pero hay cache, usa cache
       if (cachedClients.length > 0) {
@@ -747,7 +761,7 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
         toast.error("No se pudo cargar clientes", { description: e?.message });
       }
     }
-  }, [isOnline, cachedClients, offline]);
+  }, [isOnline, cachedClients, idbCacheClients]);
 
   const cargarProductos = useCallback(async () => {
     if (!isOnline) {
@@ -761,7 +775,7 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
       const items = (d.items ?? []) as Producto[];
       setProductos(items);
       // Cachea para uso offline
-      await offline.cacheProducts();
+      await idbCacheProducts();
     } catch (e: any) {
       if (cachedProducts.length > 0) {
         setProductos(cachedProducts as unknown as Producto[]);
@@ -769,7 +783,7 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
         toast.error("No se pudo cargar productos", { description: e?.message });
       }
     }
-  }, [isOnline, cachedProducts, offline]);
+  }, [isOnline, cachedProducts, idbCacheProducts]);
 
   const cargarBodegas = useCallback(async () => {
     if (!isOnline) {
@@ -796,6 +810,14 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
   }, [isOnline, cachedProducts]);
 
   useEffect(() => {
+    // B3: el objeto `offline` cambia de ref en cada render del hook
+    // (retorna un objeto literal nuevo), lo que hace que cargarClientes /
+    // cargarProductos cambien de ref y el efecto se dispare N+1 veces.
+    // Con el guard `catalogosLoadedRef` garantizamos una sola carga por
+    // instancia del componente; si las deps cambian por un cambio real
+    // (p.ej. isOnline pasó a true), la recarga manual (F5) re-monta.
+    if (catalogosLoadedRef.current) return;
+    catalogosLoadedRef.current = true;
     (async () => {
       setLoadingCatalogos(true);
       await Promise.all([cargarClientes(), cargarProductos(), cargarBodegas()]);
@@ -1022,8 +1044,9 @@ function NuevaFactura({ onDone }: NuevaFacturaProps) {
     }
 
     setSaving(true);
+    let payload: any;
     try {
-      const payload: any = {
+      payload = {
         terceroId,
         nombreCliente,
         nitCliente,

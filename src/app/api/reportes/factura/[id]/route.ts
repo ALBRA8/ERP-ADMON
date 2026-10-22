@@ -35,7 +35,20 @@ export async function GET(
   if (!empresa) return new Response("Empresa no encontrada", { status: 500 });
 
   try {
-    const pdfBuffer = await generarPDFFactura(factura, empresa);
+    // Serializar Decimal → number antes de pasar al generador PDF.
+    const facturaPlain = {
+      ...factura,
+      subtotalBruto: Number(factura.subtotalBruto),
+      descuentoTotal: Number(factura.descuentoTotal),
+      subtotalNeto: Number(factura.subtotalNeto),
+      totalIva: Number(factura.totalIva),
+      totalImpoconsumo: Number(factura.totalImpoconsumo),
+      total: Number(factura.total),
+      saldoPendiente: Number(factura.saldoPendiente ?? 0),
+      efectivoRecibido: factura.efectivoRecibido != null ? Number(factura.efectivoRecibido) : undefined,
+      cambio: factura.cambio != null ? Number(factura.cambio) : undefined,
+    };
+    const pdfBuffer = await generarPDFFactura(facturaPlain as any, empresa);
     const disposition = download ? "attachment" : "inline";
     return new Response(pdfBuffer as any, {
       headers: {

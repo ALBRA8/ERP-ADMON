@@ -84,11 +84,11 @@ export async function PUT(
       });
 
       // 2. Revertir cartera del tercero si hubo saldo
-      if (factura.terceroId && factura.saldoPendiente > 0) {
+      if (factura.terceroId && Number(factura.saldoPendiente) > 0) {
         await db.tercero.update({
           where: { id: factura.terceroId },
           data: {
-            saldoCartera: { decrement: factura.saldoPendiente },
+            saldoCartera: { decrement: Number(factura.saldoPendiente) },
           },
         });
       }

@@ -24,7 +24,11 @@ export async function GET(req: NextRequest) {
       const page = getQueryInt(req, "page", 1) ?? 1;
       const pageSize = getQueryInt(req, "pageSize", 50) ?? 50;
 
-      const where: { empresaId: string; tipo?: string; OR?: unknown[] } = {
+      const where: {
+        empresaId: string;
+        tipo?: string;
+        OR?: Array<Record<string, { contains: string }>>;
+      } = {
         empresaId: session.empresaId,
       };
       if (tipo && tipo !== "todos") where.tipo = tipo;

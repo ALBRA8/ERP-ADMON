@@ -235,16 +235,16 @@ export async function generarESF(
 
   const pasivo_corriente = seccion("pasivo_corriente");
   const pasivo_no_corriente = seccion("pasivo_no_corriente");
-  const totalPasivo = round(
-    pasivo_corriente.total + pasivo_no_corriente.total,
-    2,
-  );
-
-  // Patrimonio = saldo cuentas clase 3 + utilidad neta del período
-  // (la utilidad neta se incorpora al patrimonio del ESF)
-  const patrimonioSeccion = seccion("patrimonio");
 
   // Calcular utilidad del período (desde inicio de año hasta fechaFin)
+  // para estimar el impuesto de renta (35%) y causarlo como pasivo.
+  // En NIIF (NIC 12), el impuesto corriente causado en el período debe
+  // reconocerse como pasivo (cuenta 2410 "Impuesto de renta y
+  // complementarios por pagar") para que la ecuación contable
+  // Activo = Pasivo + Patrimonio cuadre. Si no se causa, el EER descuenta
+  // el impuesto de la utilidad neta (patrimonio) pero el ESF no refleja
+  // la contrapartida en el pasivo, produciendo un descuadre igual al
+  // monto del impuesto.
   const inicioAnio = new Date(fechaFinDate.getFullYear(), 0, 1);
   const movsAnio = await cargarMovimientos(empresaId, inicioAnio, fechaFinDate);
   const saldosAnio = agruparSaldosPorCategoria(movsAnio);
@@ -257,8 +257,49 @@ export async function generarESF(
     ingresos - costosVenta - costosProduccion - gastosAdmin - otrosGastos,
     2,
   );
-  const impuestoRenta = round(Math.max(0, utilidadAntesImpuestos) * TASA_IMPUESTO_RENTA, 2);
-  const utilidadPeriodo = round(utilidadAntesImpuestos - impuestoRenta, 2);
+  const impuestoRentaEstimado = round(
+    Math.max(0, utilidadAntesImpuestos) * TASA_IMPUESTO_RENTA,
+    2,
+  );
+  const utilidadPeriodo = round(utilidadAntesImpuestos - impuestoRentaEstimado, 2);
+
+  // Verificar si ya existen movimientos contables reales en la cuenta
+  // 2410 (Impuesto de renta y complementarios por pagar) o sus subcuentas.
+  // Si ya hay causación contable del impuesto, no agregamos una línea
+  // sintética para evitar doble conteo.
+  const saldoCuenta2410 = sumarSaldos(
+    (pasivo_corriente.lineas ?? []).filter(
+      (l) => l.codigo.startsWith("2410"),
+    ),
+  );
+  const impuestoRentaCausado = round(Math.max(0, saldoCuenta2410), 2);
+
+  // Si no hay causación contable explícita, agregar el impuesto estimado
+  // como una línea sintética en el pasivo corriente (cuenta 241005).
+  const impuestoRentaPorPagar =
+    impuestoRentaEstimado > impuestoRentaCausado
+      ? round(impuestoRentaEstimado - impuestoRentaCausado, 2)
+      : 0;
+
+  if (impuestoRentaPorPagar > 0) {
+    pasivo_corriente.lineas.push({
+      codigo: "241005",
+      nombre: "Impuesto de renta y complementarios por pagar (estimado)",
+      saldo: impuestoRentaPorPagar,
+      naturaleza: "credito",
+    });
+    pasivo_corriente.lineas.sort((a, b) => a.codigo.localeCompare(b.codigo));
+    pasivo_corriente.total = round(pasivo_corriente.total + impuestoRentaPorPagar, 2);
+  }
+
+  const totalPasivo = round(
+    pasivo_corriente.total + pasivo_no_corriente.total,
+    2,
+  );
+
+  // Patrimonio = saldo cuentas clase 3 + utilidad neta del período
+  // (la utilidad neta se incorpora al patrimonio del ESF)
+  const patrimonioSeccion = seccion("patrimonio");
 
   // Patrimonio total = saldo cuentas clase 3 (incluye capital + utilidades acumuladas
   // registradas como cuentas patrimonio, exluyendo resultado del período si ya está

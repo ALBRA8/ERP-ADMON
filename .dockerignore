@@ -1,0 +1,55 @@
+# Artefactos de build y dependencias
+node_modules
+.next
+out
+dist
+build
+
+# Logs y archivos temporales
+*.log
+dev.log
+server.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Datos locales (no incluir la DB local en el build)
+data
+*.db
+*.db-journal
+prisma/migrations/dev.db*
+
+# Entorno y secretos
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+
+# IDE / SO
+.vscode
+.idea
+.DS_Store
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Docker (evitar recurrencia)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentación y auditorías (no se necesitan en runtime)
+docs
+audit
+agent-ctx
+worklog.md
+README.md
+skills
+tool-results
+upload
+examples

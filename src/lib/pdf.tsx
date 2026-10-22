@@ -910,8 +910,8 @@ export async function generarPDFBalancePrueba(
   const sumas: Record<string, { debito: number; credito: number }> = {};
   for (const m of movs) {
     const cur = sumas[m.cuentaId] ?? { debito: 0, credito: 0 };
-    cur.debito += m.debito;
-    cur.credito += m.credito;
+    cur.debito += Number(m.debito);
+    cur.credito += Number(m.credito);
     sumas[m.cuentaId] = cur;
   }
   const rows = cuentas.map((c) => {
@@ -1211,8 +1211,8 @@ export async function generarPDFLibroMayor(
       },
       _sum: { debito: true, credito: true },
     });
-    const deb = prev._sum.debito ?? 0;
-    const cre = prev._sum.credito ?? 0;
+    const deb = Number(prev._sum.debito ?? 0);
+    const cre = Number(prev._sum.credito ?? 0);
     saldoAnterior = round(
       cuenta.naturaleza === "debito" ? deb - cre : cre - deb,
       2,
@@ -1221,12 +1221,12 @@ export async function generarPDFLibroMayor(
 
   let saldo = saldoAnterior;
   const rows = movs.map((m) => {
-    saldo = round(saldo + m.debito - m.credito, 2);
+    saldo = round(saldo + Number(m.debito) - Number(m.credito), 2);
     return { ...m, saldo };
   });
 
-  const totalDebito = round(movs.reduce((a, m) => a + m.debito, 0), 2);
-  const totalCredito = round(movs.reduce((a, m) => a + m.credito, 0), 2);
+  const totalDebito = round(movs.reduce((a, m) => a + Number(m.debito), 0), 2);
+  const totalCredito = round(movs.reduce((a, m) => a + Number(m.credito), 0), 2);
 
   const doc = (
     <Document title={`Libro Mayor ${cuenta.codigo}`} author={empresa.razonSocial}>
@@ -1340,7 +1340,7 @@ export async function generarPDFKardex(
     4,
   );
   let salAntValor = round(
-    prevMovs.reduce((a, m) => a + m.costoTotal, 0),
+    prevMovs.reduce((a, m) => a + Number(m.costoTotal), 0),
     2,
   );
 
@@ -1361,13 +1361,13 @@ export async function generarPDFKardex(
   let saldoV = salAntValor;
   const rows = movs.map((m) => {
     saldoC = round(saldoC + m.cantidad, 4);
-    saldoV = round(saldoV + m.costoTotal, 2);
+    saldoV = round(saldoV + Number(m.costoTotal), 2);
     return {
       ...m,
       entradaCantidad: m.cantidad > 0 ? Math.abs(m.cantidad) : 0,
-      entradaValor: m.cantidad > 0 ? Math.abs(m.costoTotal) : 0,
+      entradaValor: m.cantidad > 0 ? Math.abs(Number(m.costoTotal)) : 0,
       salidaCantidad: m.cantidad < 0 ? Math.abs(m.cantidad) : 0,
-      salidaValor: m.cantidad < 0 ? Math.abs(m.costoTotal) : 0,
+      salidaValor: m.cantidad < 0 ? Math.abs(Number(m.costoTotal)) : 0,
       saldoCantidad: saldoC,
       saldoValor: saldoV,
     };
@@ -1623,7 +1623,7 @@ export async function generarPDFNomina(
                       Total devengado
                     </Text>
                     <Text style={[styles.totalsValue, { fontSize: 7 }]}>
-                      {fmtCOP(d.totalDevengado)}
+                      {fmtCOP(Number(d.totalDevengado))}
                     </Text>
                   </View>
                 </View>
@@ -1647,13 +1647,13 @@ export async function generarPDFNomina(
                       Total deducciones
                     </Text>
                     <Text style={[styles.totalsValue, { fontSize: 7 }]}>
-                      {fmtCOP(d.totalDeducciones)}
+                      {fmtCOP(Number(d.totalDeducciones))}
                     </Text>
                   </View>
                 </View>
               </View>
               <View style={[styles.totalsTable, { width: "40%", marginTop: 4 }]}>
-                <TotalRow label="Neto a pagar" value={fmtCOP(d.netoAPagar)} bold />
+                <TotalRow label="Neto a pagar" value={fmtCOP(Number(d.netoAPagar))} bold />
               </View>
               {d.cuneEmpleado && (
                 <View style={styles.cufeBox}>
@@ -1666,11 +1666,11 @@ export async function generarPDFNomina(
         })}
 
         <View style={[styles.totalsTable, { width: "100%", marginTop: 12 }]}>
-          <TotalRow label="Total devengos" value={fmtCOP(nomina.totalDevengos)} bold />
-          <TotalRow label="Total deducciones" value={fmtCOP(nomina.totalDeducciones)} bold />
-          <TotalRow label="Aportes patronales" value={fmtCOP(nomina.totalAportesPatronales)} bold />
-          <TotalRow label="Provisiones" value={fmtCOP(nomina.totalProvisiones)} bold />
-          <TotalRow label="Neto a pagar" value={fmtCOP(nomina.netoAPagar)} bold />
+          <TotalRow label="Total devengos" value={fmtCOP(Number(nomina.totalDevengos))} bold />
+          <TotalRow label="Total deducciones" value={fmtCOP(Number(nomina.totalDeducciones))} bold />
+          <TotalRow label="Aportes patronales" value={fmtCOP(Number(nomina.totalAportesPatronales))} bold />
+          <TotalRow label="Provisiones" value={fmtCOP(Number(nomina.totalProvisiones))} bold />
+          <TotalRow label="Neto a pagar" value={fmtCOP(Number(nomina.netoAPagar))} bold />
         </View>
 
         {nomina.cune && (
@@ -1710,8 +1710,8 @@ export async function generarPDFReporteEjecutivo(
     select: { total: true },
   });
 
-  const ventasMes = round(facturasMes.reduce((a, f) => a + f.total, 0), 2);
-  const ventasMesPasado = round(facturasMesPasado.reduce((a, f) => a + f.total, 0), 2);
+  const ventasMes = round(facturasMes.reduce((a, f) => a + Number(f.total), 0), 2);
+  const ventasMesPasado = round(facturasMesPasado.reduce((a, f) => a + Number(f.total), 0), 2);
   const variacion = ventasMesPasado > 0 ? round(((ventasMes - ventasMesPasado) / ventasMesPasado) * 100, 2) : 0;
   const numFacturas = facturasMes.length;
   const ticketPromedio = numFacturas > 0 ? round(ventasMes / numFacturas, 2) : 0;
@@ -1721,17 +1721,17 @@ export async function generarPDFReporteEjecutivo(
     where: { empresaId, estado: "vigente", saldoPendiente: { gt: 0 } },
     select: { saldoPendiente: true, fechaVencimiento: true },
   });
-  const carteraTotal = round(cartera.reduce((a, c) => a + c.saldoPendiente, 0), 2);
+  const carteraTotal = round(cartera.reduce((a, c) => a + Number(c.saldoPendiente), 0), 2);
   let cartera30 = 0, cartera60 = 0, cartera90 = 0, carteraMas90 = 0, carteraVencida = 0;
   for (const c of cartera) {
     if (!c.fechaVencimiento) continue;
     const dias = Math.floor((now.getTime() - c.fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24));
     if (dias <= 0) continue;
-    if (dias <= 30) cartera30 += c.saldoPendiente;
-    else if (dias <= 60) cartera60 += c.saldoPendiente;
-    else if (dias <= 90) cartera90 += c.saldoPendiente;
-    else carteraMas90 += c.saldoPendiente;
-    carteraVencida += c.saldoPendiente;
+    if (dias <= 30) cartera30 += Number(c.saldoPendiente);
+    else if (dias <= 60) cartera60 += Number(c.saldoPendiente);
+    else if (dias <= 90) cartera90 += Number(c.saldoPendiente);
+    else carteraMas90 += Number(c.saldoPendiente);
+    carteraVencida += Number(c.saldoPendiente);
   }
 
   // Top productos por valor vendido en el mes
@@ -1757,7 +1757,7 @@ export async function generarPDFReporteEjecutivo(
       porProducto[d.productoId] = { descripcion: d.descripcion, cantidad: 0, total: 0 };
     }
     porProducto[d.productoId].cantidad += d.cantidad;
-    porProducto[d.productoId].total += d.total;
+    porProducto[d.productoId].total += Number(d.total);
   }
   const topProductos = Object.entries(porProducto)
     .map(([id, v]) => ({ id, ...v, total: round(v.total, 2) }))
@@ -1831,7 +1831,7 @@ export async function generarPDFReporteEjecutivo(
             </View>
             <View style={styles.kpiBox}>
               <Text style={styles.kpiLabel}>Compras del mes</Text>
-              <Text style={styles.kpiValue}>{fmtCOP(comprasMes._sum.total ?? 0)}</Text>
+              <Text style={styles.kpiValue}>{fmtCOP(Number(comprasMes._sum.total ?? 0))}</Text>
               <Text style={{ fontSize: 7, color: COLORS.textMuted }}>
                 {numFacturas} facturas emitidas
               </Text>
@@ -1848,7 +1848,7 @@ export async function generarPDFReporteEjecutivo(
             </View>
             <View style={styles.kpiBox}>
               <Text style={styles.kpiLabel}>Movimientos contables</Text>
-              <Text style={styles.kpiValue}>{fmtCOP(contaMovs._sum.debito ?? 0)}</Text>
+              <Text style={styles.kpiValue}>{fmtCOP(Number(contaMovs._sum.debito ?? 0))}</Text>
               <Text style={{ fontSize: 7, color: COLORS.textMuted }}>Débitos del mes</Text>
             </View>
           </View>

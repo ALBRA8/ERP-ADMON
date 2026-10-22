@@ -49,11 +49,11 @@ export async function POST(
         });
         const numeroRev = `CG-${new Date().getFullYear()}-${String(cnt + 1).padStart(6, "0")}`;
         const totalDebito = round(
-          original.movimientos.reduce((a, m) => a + m.credito, 0),
+          original.movimientos.reduce((a, m) => a + Number(m.credito), 0),
           2,
         );
         const totalCredito = round(
-          original.movimientos.reduce((a, m) => a + m.debito, 0),
+          original.movimientos.reduce((a, m) => a + Number(m.debito), 0),
           2,
         );
         const comprobanteRev = await db.comprobante.create({

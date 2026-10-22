@@ -864,7 +864,6 @@ function BloqueRow({
   async function toggleActivo() {
     try {
       await apiPost("/api/servicios-publicos/bloques", {
-        id: bloque.id,
         ...bloque,
         activo: !bloque.activo,
       });

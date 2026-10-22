@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     }
     const result = await registerUser(parsed.data);
     if ("error" in result) {
-      return badRequest(result.error);
+      return badRequest(result.error ?? "Error al registrar empresa");
     }
 
     // H-ALT-008: auditar registro de empresa nueva.

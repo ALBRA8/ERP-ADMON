@@ -29,8 +29,29 @@ export async function GET() {
 
     // KPIs: ventas mes, cartera vencida, stock crítico, utilidad
     const now = new Date();
-    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1);
-    const inicioMesPasado = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    // BUG #5: usar constructor explícito de hora local (00:00:00.000) para
+    // que `inicioMes` sea medianoche del primer día del mes en la zona
+    // horaria del servidor. Esto evita discrepancias cuando el `new Date()`
+    // implícito devuelve horas/minutos no nulos en algunos motores JS.
+    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const inicioMesPasado = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    // Debug de fechas (BUG #5): imprime los rangos para auditoría.
+    console.log(
+      "[dashboard] inicioMes:",
+      inicioMes.toISOString(),
+      "inicioMesPasado:",
+      inicioMesPasado.toISOString(),
+      "now:",
+      now.toISOString(),
+    );
 
     const facturasMes = await db.facturaVenta.findMany({
       where: {

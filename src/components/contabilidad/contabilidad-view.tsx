@@ -5,7 +5,7 @@
 // Plan Único de Cuentas (PUC) | Asientos | Balance de Prueba | Libro Mayor
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
   Plus,
@@ -946,9 +946,17 @@ function DialogNuevaCuenta({
   }, [open]);
 
   // Autocalcular nivel según padre
+  // B1 (Maximum update depth): estabilizamos `cuentas` vía ref para que
+  // el efecto no se redispare si el padre pasa una nueva referencia de
+  // array en cada render (p.ej. tras un re-render del parent por otro
+  // state). También saltamos el efecto cuando el diálogo está cerrado
+  // para evitar setState innecesarios en mounts iniciales.
+  const cuentasRef = useRef(cuentas);
+  cuentasRef.current = cuentas;
   useEffect(() => {
+    if (!open) return;
     if (cuentaPadreId) {
-      const padre = cuentas.find((c) => c.id === cuentaPadreId);
+      const padre = cuentasRef.current.find((c) => c.id === cuentaPadreId);
       if (padre) {
         setNivel(padre.nivel + 1);
         // sugerir naturaleza del padre
@@ -963,7 +971,7 @@ function DialogNuevaCuenta({
       else if (c.length === 6) setNivel(4);
       else if (c.length === 8) setNivel(5);
     }
-  }, [cuentaPadreId, codigo, cuentas]);
+  }, [open, cuentaPadreId, codigo]);
 
   async function handleSave() {
     if (!codigo.trim() || !nombre.trim()) {

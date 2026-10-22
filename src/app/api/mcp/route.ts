@@ -8,6 +8,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createMcpServer, logMcpCall } from "@/lib/mcp-server";
 import { verifyToken } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { safeEqualStrings } from "@/lib/crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +49,9 @@ async function authenticate(req: NextRequest): Promise<AuthResult> {
   const token = match[1];
 
   // 1. ¿Coincide con el token fijo MCP_API_TOKEN?
-  if (MCP_API_TOKEN && token === MCP_API_TOKEN) {
+  // F-001: usar comparación en tiempo constante (timingSafeEqual vía
+  // safeEqualStrings) para evitar timing attacks sobre el secret.
+  if (MCP_API_TOKEN && safeEqualStrings(token, MCP_API_TOKEN)) {
     let empresaId = MCP_EMPRESA_ID || undefined;
     if (!empresaId) {
       const emp = await db.empresa.findFirst({ select: { id: true } });

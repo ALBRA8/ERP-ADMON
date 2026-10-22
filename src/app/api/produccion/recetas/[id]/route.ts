@@ -70,14 +70,13 @@ export async function GET(
     });
     if (!receta) return notFound("Receta no encontrada");
 
-    const pmap = await lookupProductos(
-      receta.productoId,
-      receta.ingredientes,
-    );
+    const pmap = receta.productoId
+      ? await lookupProductos(receta.productoId, receta.ingredientes)
+      : new Map();
 
     return ok({
       ...receta,
-      producto: pmap.get(receta.productoId) ?? null,
+      producto: receta.productoId ? pmap.get(receta.productoId) ?? null : null,
       ingredientes: receta.ingredientes.map((ing) => ({
         ...ing,
         producto: ing.productoId ? pmap.get(ing.productoId) ?? null : null,
@@ -107,6 +106,7 @@ export async function PUT(
       return badRequest("Datos inválidos", parsed.error.flatten());
     const d = parsed.data;
 
+    if (!d.productoId) return badRequest("productoId es obligatorio");
     const prod = await db.producto.findFirst({
       where: { id: d.productoId, empresaId: session.empresaId },
     });

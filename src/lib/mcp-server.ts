@@ -114,11 +114,11 @@ async function getDashboardData(empresaId: string) {
     ]);
 
   const ventasMes = round(
-    facturasMes.reduce((a, f) => a + f.total, 0),
+    facturasMes.reduce((a, f) => a + Number(f.total), 0),
     2,
   );
   const carteraTotal = round(
-    carteraRaw.reduce((a, c) => a + c.saldoPendiente, 0),
+    carteraRaw.reduce((a, c) => a + Number(c.saldoPendiente), 0),
     2,
   );
   const hoy = new Date();
@@ -133,11 +133,12 @@ async function getDashboardData(empresaId: string) {
       (hoy.getTime() - c.fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24),
     );
     if (dias <= 0) continue;
-    if (dias <= 30) cartera30 += c.saldoPendiente;
-    else if (dias <= 60) cartera60 += c.saldoPendiente;
-    else if (dias <= 90) cartera90 += c.saldoPendiente;
-    else carteraMas90 += c.saldoPendiente;
-    carteraVencida += c.saldoPendiente;
+    const saldo = Number(c.saldoPendiente);
+    if (dias <= 30) cartera30 += saldo;
+    else if (dias <= 60) cartera60 += saldo;
+    else if (dias <= 90) cartera90 += saldo;
+    else carteraMas90 += saldo;
+    carteraVencida += saldo;
   }
 
   const stockCritico = productos
@@ -151,11 +152,11 @@ async function getDashboardData(empresaId: string) {
     .filter((p) => p.stockActual <= p.stockMinimo);
 
   const comprasMesTotal = round(
-    comprasMes.reduce((a, c) => a + c.total, 0),
+    comprasMes.reduce((a, c) => a + Number(c.total), 0),
     2,
   );
   const egresosMesTotal = round(
-    egresosMes.reduce((a, c) => a + c.valorTotal, 0),
+    egresosMes.reduce((a, c) => a + Number(c.valorTotal), 0),
     2,
   );
 
@@ -232,7 +233,7 @@ async function getProducto(empresaId: string, id: string) {
   return {
     ...p,
     stockTotal: p.saldosInventario.reduce((a, s) => a + s.cantidad, 0),
-    valorInventario: p.saldosInventario.reduce((a, s) => a + s.costoTotal, 0),
+    valorInventario: p.saldosInventario.reduce((a, s) => a + Number(s.costoTotal), 0),
     bodegas: p.saldosInventario,
   };
 }
@@ -324,8 +325,8 @@ async function getBalance(empresaId: string) {
   const sumas: Record<string, { debito: number; credito: number }> = {};
   for (const m of movs) {
     const cur = sumas[m.cuentaId] ?? { debito: 0, credito: 0 };
-    cur.debito += m.debito;
-    cur.credito += m.credito;
+    cur.debito += Number(m.debito);
+    cur.credito += Number(m.credito);
     sumas[m.cuentaId] = cur;
   }
   const balance = cuentas.map((c) => {
@@ -384,7 +385,7 @@ async function getMayorCuenta(empresaId: string, codigo: string) {
       naturaleza: cuenta.naturaleza,
     },
     movimientos: movs.map((m) => {
-      saldo = round(saldo + m.debito - m.credito, 2);
+      saldo = round(saldo + Number(m.debito) - Number(m.credito), 2);
       return {
         fecha: m.fecha,
         comprobante: m.comprobante?.numero,
@@ -429,7 +430,7 @@ async function getKardex(
       : null,
     movimientos: movs.map((m) => {
       cantidad = round(cantidad + m.cantidad, 2);
-      valor = round(valor + m.costoTotal, 2);
+      valor = round(valor + Number(m.costoTotal), 2);
       return {
         fecha: m.fecha,
         bodega: m.bodega?.nombre,
@@ -1532,7 +1533,7 @@ export function createMcpServer(ctx: McpContext): McpServer {
             2,
           );
           const nuevoCosto = round(
-            existing.costoTotal +
+            Number(existing.costoTotal) +
               (args.tipo === "salida" ? -costoTotal : costoTotal),
             2,
           );

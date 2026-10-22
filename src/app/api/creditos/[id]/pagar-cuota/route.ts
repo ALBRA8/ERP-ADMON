@@ -87,7 +87,7 @@ export async function POST(
       // Decrementar saldo capital del crédito (por el capital de la cuota)
       const nuevoSaldo = Math.max(
         0,
-        Math.round((credito.saldoCapital - cuota.capital) * 100) / 100,
+        Math.round((Number(credito.saldoCapital) - Number(cuota.capital)) * 100) / 100,
       );
       const creditoActualizado = await tx.credito.update({
         where: { id: credito.id },
@@ -103,7 +103,7 @@ export async function POST(
           where: { id: credito.terceroId },
           data: {
             saldoCartera: {
-              decrement: cuota.capital,
+              decrement: Number(cuota.capital),
             },
           },
         });

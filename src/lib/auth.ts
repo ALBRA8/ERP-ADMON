@@ -20,22 +20,27 @@ import { randomUUID } from "crypto";
 import { isTokenRevoked, revokeToken } from "@/lib/token-revocation";
 
 // ---------- H-CRIT-002: APP_SECRET fail-closed ----------
+// Lazy validation: solo valida en runtime, no durante el build de Next.js.
 const APP_SECRET_DEFAULT = "marsella-erp-dev-secret-change-me-in-production-min-32-chars";
-const APP_SECRET_ENV = process.env.APP_SECRET;
-const APP_SECRET_OK =
-  !!APP_SECRET_ENV && APP_SECRET_ENV.length >= 32 && APP_SECRET_ENV !== APP_SECRET_DEFAULT;
 
-if (!APP_SECRET_OK) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "APP_SECRET debe estar configurada con al menos 32 caracteres en producción (no se permite el valor default).",
-    );
+function getAppSecret(): string {
+  const env = process.env.APP_SECRET;
+  const ok = !!env && env.length >= 32 && env !== APP_SECRET_DEFAULT;
+  if (!ok) {
+    if (process.env.NODE_ENV === "production" && !process.env.NEXT_PHASE?.includes("build")) {
+      throw new Error(
+        "APP_SECRET debe estar configurada con al menos 32 caracteres en producción.",
+      );
+    }
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[auth] APP_SECRET no configurada, usando dev fallback.");
+    }
+    return APP_SECRET_DEFAULT;
   }
-  console.warn(
-    "[auth] APP_SECRET no configurada o <32 chars, usando dev fallback. NO usar en producción.",
-  );
+  return env!;
 }
-const APP_SECRET = APP_SECRET_OK && APP_SECRET_ENV ? APP_SECRET_ENV : APP_SECRET_DEFAULT;
+
+const APP_SECRET = getAppSecret();
 
 const SESSION_COOKIE = "marsella_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12; // 12h
@@ -228,12 +233,15 @@ export function hasPermission(
 ): boolean {
   const role = ROLES[rol];
   if (!role) return false;
-  if (role.permissions.includes("*")) return true;
+  // Cast a readonly string[]: al ser `as const`, `permissions` es una
+  // unión de tuplas literales y .includes() queda tipado como `never`.
+  const permissions = role.permissions as readonly string[];
+  if (permissions.includes("*")) return true;
   // wildcards tipo "contabilidad:*"
   const parts = permission.split(":");
   const moduleWildcard = `${parts[0]}:*`;
-  if (role.permissions.includes(moduleWildcard)) return true;
-  return role.permissions.includes(permission);
+  if (permissions.includes(moduleWildcard)) return true;
+  return permissions.includes(permission);
 }
 
 /**

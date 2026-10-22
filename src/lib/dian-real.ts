@@ -11,6 +11,7 @@
 // ============================================================
 
 import { createHash, X509Certificate } from "crypto";
+// @ts-ignore TODO: tipar correctamente — @types/node-forge no está instalado.
 import forge from "node-forge";
 import { SignedXml } from "xml-crypto";
 import { db } from "@/lib/db";

@@ -9,6 +9,10 @@ import {
   withAuth,
   parseBody,
 } from "@/lib/api";
+import {
+  generarAsientoReciboCaja,
+  generarAsientoEgreso,
+} from "@/lib/contabilidad";
 
 // Recibos de Caja (CXC) y Comprobantes de Egreso (CXP)
 // GET: lista del tenant con paginación por `tipo`.
@@ -142,6 +146,30 @@ export async function POST(req: NextRequest) {
             return egreso;
           }
         });
+        // Etiqueta para logs (numero o id) del comprobante creado. Ambos
+        // modelos (ReciboCaja, ComprobanteEgreso) exponen `id` y `numero`,
+        // pero el narrowing por `"numero" in item` colapsa la rama falsa a
+        // `never`; por eso casteamos a un tipo mínimo explícito.
+        const itemRef = item as { id: string; numero: string };
+        const itemLabel = itemRef.numero ?? itemRef.id;
+        // Generar asiento contable asociado al comprobante de cartera:
+        //  - recibo  → DB 110505/111005, CR 130505 (recaudo CXC)
+        //  - egreso  → DB 220505, CR 110505/111005 (pago CXP)
+        // Se ejecuta fuera de la transacción (el helper usa `db` global).
+        // El recibo/egreso ya quedó persistido; si el asiento falla lo
+        // registramos como warning sin invalidar la operación principal.
+        try {
+          if (data.tipo === "recibo") {
+            await generarAsientoReciboCaja(itemRef.id, session.empresaId);
+          } else {
+            await generarAsientoEgreso(itemRef.id, session.empresaId);
+          }
+        } catch (asientoErr) {
+          console.warn(
+            `[cartera] Falló asiento contable para ${data.tipo} ${itemLabel}:`,
+            asientoErr,
+          );
+        }
         return ok(item);
       } catch (e) {
         return serverError("Error al crear comprobante", e);

@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
 
     const enriched = items.map((r) => ({
       ...r,
-      producto: pmap.get(r.productoId) ?? null,
+      producto: r.productoId ? pmap.get(r.productoId) ?? null : null,
       ingredientes: r.ingredientes.map((ing) => ({
         ...ing,
         producto: ing.productoId ? pmap.get(ing.productoId) ?? null : null,
@@ -160,6 +160,7 @@ export async function PUT(req: NextRequest) {
     });
     if (!existing) return badRequest("Receta no encontrada");
 
+    if (!d.productoId) return badRequest("productoId es obligatorio");
     const prod = await db.producto.findFirst({
       where: { id: d.productoId, empresaId: session.empresaId },
     });

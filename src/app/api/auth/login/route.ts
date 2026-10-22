@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         email: parsed.data.email,
         ip,
       });
-      return badRequest(result.error);
+      return badRequest(result.error ?? "Credenciales inválidas");
     }
 
     // H-ALT-008: auditar login exitoso.

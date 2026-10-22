@@ -77,7 +77,7 @@ export async function POST() {
         razonSocial: empresa.razonSocial,
       },
       usuario: { id: usuario.id, email: usuario.email, nombre: usuario.nombre },
-      message: "Sesión demo iniciada (demo@marsella.com / demo1234)",
+      message: "Sesión demo iniciada",
     });
   } catch (e) {
     return serverError("Error al iniciar demo", e);

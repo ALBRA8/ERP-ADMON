@@ -132,7 +132,7 @@ export async function generarFormato1007(
     // Suma de retenciones de las FacturasCompra aplicadas
     let totalRetenido = 0;
     let totalBase = 0;
-    let totalPago = eg.valorTotal;
+    let totalPago = Number(eg.valorTotal);
     if (eg.aplicacionCompras) {
       try {
         const apps = JSON.parse(eg.aplicacionCompras) as Array<{
@@ -145,8 +145,8 @@ export async function generarFormato1007(
             where: { id: a.facturaId },
           });
           if (!fc) continue;
-          totalRetenido += fc.totalRetenciones || 0;
-          totalBase += fc.subtotal || 0;
+          totalRetenido += Number(fc.totalRetenciones || 0);
+          totalBase += Number(fc.subtotal || 0);
         }
       } catch {
         /* JSON inválido → ignore */
@@ -189,7 +189,7 @@ export async function generarFormato1007(
     let totalReteIva = 0;
     let totalReteIca = 0;
     let totalBase = 0;
-    let totalPago = rc.valorTotal;
+    let totalPago = Number(rc.valorTotal);
 
     if (rc.aplicacionFacturas) {
       try {
@@ -203,10 +203,10 @@ export async function generarFormato1007(
             where: { id: a.facturaId },
           });
           if (!fv) continue;
-          totalReteFuente += fv.totalReteFuente || 0;
-          totalReteIva += fv.totalReteIva || 0;
-          totalReteIca += fv.totalReteICA || 0;
-          totalBase += fv.subtotalNeto || 0;
+          totalReteFuente += Number(fv.totalReteFuente || 0);
+          totalReteIva += Number(fv.totalReteIva || 0);
+          totalReteIca += Number(fv.totalReteICA || 0);
+          totalBase += Number(fv.subtotalNeto || 0);
         }
       } catch {
         /* ignore */
@@ -288,20 +288,20 @@ export async function generarFormato2276(
 
   const registros: RegistroMedio[] = [];
   for (const fc of compras) {
-    const retenido = fc.totalRetenciones || 0;
+    const retenido = Number(fc.totalRetenciones || 0);
     if (retenido <= 0) continue;
     const tInfo = await infoTercero(fc.terceroId);
     const tipoDoc = tInfo?.tipoDocExpedida ?? "NIT";
     const nit = tInfo?.nitTercero ?? fc.nitProveedor ?? "0";
     const razon = tInfo?.razonSocial ?? fc.nombreProveedor ?? "SIN NOMBRE";
     const ciudad = tInfo?.ciudad ?? null;
-    const base = fc.subtotal || fc.total || 0;
+    const base = Number(fc.subtotal || fc.total || 0);
     registros.push({
       tipoDocExpedida: tipoDoc,
       nitTercero: nit,
       razonSocial: razon,
       concepto: "RETEFUENTE",
-      valorPago: redondear(fc.total),
+      valorPago: redondear(Number(fc.total)),
       baseRetencion: redondear(base),
       porcentaje: pctSobreBase(retenido, base),
       valorRetenido: redondear(retenido),
@@ -343,22 +343,22 @@ export async function generarFormato2277(
     },
   });
   for (const fv of ventas) {
-    if ((fv.totalIva || 0) <= 0) continue;
+    if (Number(fv.totalIva || 0) <= 0) continue;
     const tInfo = await infoTercero(fv.terceroId);
     const tipoDoc = tInfo?.tipoDocExpedida ?? "NIT";
     const nit = tInfo?.nitTercero ?? fv.nitCliente ?? "0";
     const razon = tInfo?.razonSocial ?? fv.nombreCliente ?? "SIN NOMBRE";
     const ciudad = tInfo?.ciudad ?? null;
-    const base = fv.subtotalNeto || fv.total || 0;
+    const base = Number(fv.subtotalNeto || fv.total || 0);
     registros.push({
       tipoDocExpedida: tipoDoc,
       nitTercero: nit,
       razonSocial: razon,
       concepto: "IVA_GENERADO",
-      valorPago: redondear(fv.total),
+      valorPago: redondear(Number(fv.total)),
       baseRetencion: redondear(base),
-      porcentaje: pctSobreBase(fv.totalIva, base),
-      valorRetenido: redondear(fv.totalIva),
+      porcentaje: pctSobreBase(Number(fv.totalIva), base),
+      valorRetenido: redondear(Number(fv.totalIva)),
       ciudad,
     });
   }
@@ -372,22 +372,22 @@ export async function generarFormato2277(
     },
   });
   for (const fc of compras) {
-    if ((fc.totalIva || 0) <= 0) continue;
+    if (Number(fc.totalIva || 0) <= 0) continue;
     const tInfo = await infoTercero(fc.terceroId);
     const tipoDoc = tInfo?.tipoDocExpedida ?? "NIT";
     const nit = tInfo?.nitTercero ?? fc.nitProveedor ?? "0";
     const razon = tInfo?.razonSocial ?? fc.nombreProveedor ?? "SIN NOMBRE";
     const ciudad = tInfo?.ciudad ?? null;
-    const base = fc.subtotal || fc.total || 0;
+    const base = Number(fc.subtotal || fc.total || 0);
     registros.push({
       tipoDocExpedida: tipoDoc,
       nitTercero: nit,
       razonSocial: razon,
       concepto: "IVA_DEDUCTIBLE",
-      valorPago: redondear(fc.total),
+      valorPago: redondear(Number(fc.total)),
       baseRetencion: redondear(base),
-      porcentaje: pctSobreBase(fc.totalIva, base),
-      valorRetenido: redondear(fc.totalIva),
+      porcentaje: pctSobreBase(Number(fc.totalIva), base),
+      valorRetenido: redondear(Number(fc.totalIva)),
       ciudad,
     });
   }
@@ -436,16 +436,16 @@ export async function generarFormato1647(
     const key = `${nit}`;
     const existing = porTercero.get(key);
     if (existing) {
-      existing.total += fv.total || 0;
-      existing.base += fv.subtotalNeto || fv.total || 0;
+      existing.total += Number(fv.total || 0);
+      existing.base += Number(fv.subtotalNeto || fv.total || 0);
     } else {
       porTercero.set(key, {
         tipoDoc,
         nit,
         razon,
         ciudad,
-        total: fv.total || 0,
-        base: fv.subtotalNeto || fv.total || 0,
+        total: Number(fv.total || 0),
+        base: Number(fv.subtotalNeto || fv.total || 0),
       });
     }
   }
@@ -507,16 +507,16 @@ export async function generarFormato2238(
     const key = `${nit}`;
     const existing = porTercero.get(key);
     if (existing) {
-      existing.total += eg.valorTotal || 0;
-      existing.base += eg.valorTotal || 0;
+      existing.total += Number(eg.valorTotal || 0);
+      existing.base += Number(eg.valorTotal || 0);
     } else {
       porTercero.set(key, {
         tipoDoc,
         nit,
         razon,
         ciudad,
-        total: eg.valorTotal || 0,
-        base: eg.valorTotal || 0,
+        total: Number(eg.valorTotal || 0),
+        base: Number(eg.valorTotal || 0),
       });
     }
   }
@@ -538,16 +538,16 @@ export async function generarFormato2238(
     const key = `${nit}`;
     const existing = porTercero.get(key);
     if (existing) {
-      existing.total += fc.total || 0;
-      existing.base += fc.subtotal || fc.total || 0;
+      existing.total += Number(fc.total || 0);
+      existing.base += Number(fc.subtotal || fc.total || 0);
     } else {
       porTercero.set(key, {
         tipoDoc,
         nit,
         razon,
         ciudad,
-        total: fc.total || 0,
-        base: fc.subtotal || fc.total || 0,
+        total: Number(fc.total || 0),
+        base: Number(fc.subtotal || fc.total || 0),
       });
     }
   }

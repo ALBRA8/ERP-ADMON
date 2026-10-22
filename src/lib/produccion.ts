@@ -9,6 +9,7 @@
 // ============================================================
 
 import { db } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 import { round } from "@/lib/currency";
 import { registrarMovimientoInventario } from "@/lib/inventario";
 
@@ -225,7 +226,7 @@ export async function registrarSalidaMateriasPrimas(
 // "shape" que el client para los modelos que usamos aquí. Permitimos
 // pasar opcionalmente una tx para que la entrada se ejecute dentro
 // de la transacción del caller (A-CRIT-001).
-type TxClient = typeof db;
+type TxClient = typeof db | Prisma.TransactionClient;
 
 export async function registrarEntradaProductoTerminado(
   ordenId: string,

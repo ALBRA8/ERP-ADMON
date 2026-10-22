@@ -317,8 +317,8 @@ export async function enviarEventoRadianADian(
     //    usa la referencia XPath "//*[local-name()='Invoice']" —
     //    hacemos una firma equivalente adaptada a ApplicationResponse.
     const cufe = (evento.respuestaDIAN ?? "").includes("cufeEvento")
-      ? (JSON.parse(evento.respuestaDIAN).cufeEvento as string)
-      : evento.trackId ?? evento.id; // fallback
+      ? (JSON.parse(evento.respuestaDIAN ?? "{}").cufeEvento as string)
+      : (evento.trackId ?? evento.id); // fallback
 
     const xmlFirmado = signApplicationResponseWithXAdES(
       evento.xmlEvento,

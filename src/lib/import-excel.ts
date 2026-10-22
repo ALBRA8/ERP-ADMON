@@ -104,7 +104,12 @@ function similarity(a: string, b: string): number {
 export async function parseExcelFile(buffer: Buffer): Promise<ParsedExcel> {
   const ExcelJS = await import("exceljs");
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer, { cellText: false, cellDates: true });
+  // Cast a `any`: exceljs declara su propia `interface Buffer extends ArrayBuffer`
+  // global que colisiona con el `Buffer<TArrayBuffer>` genérico de @types/node,
+  // por lo que TS no logra reconciliar los dos tipos. Además, las opciones
+  // `cellText`/`cellDates` existen en runtime pero no en `XlsxReadOptions`.
+  // El cast evita ambos mismatches.
+  await wb.xlsx.load(buffer as unknown as ArrayBuffer, { cellText: false, cellDates: true } as any);
 
   const sheets: SheetData[] = [];
   let totalRows = 0;

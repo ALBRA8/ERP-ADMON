@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       const enriched = items.map((b) => ({
         ...b,
         productosCount: b.saldosInventario.length,
-        valorTotal: b.saldosInventario.reduce((a, s) => a + s.costoTotal, 0),
+        valorTotal: b.saldosInventario.reduce((a, s) => a + Number(s.costoTotal), 0),
         cantidadTotal: b.saldosInventario.reduce((a, s) => a + s.cantidad, 0),
       }));
       return ok(enriched);

@@ -227,6 +227,10 @@ async function main() {
     { codigo: "2408", nombre: "IVA por pagar", nivel: 3, naturaleza: "credito" },
     { codigo: "240805", nombre: "IVA generado", nivel: 5, naturaleza: "credito" },
     { codigo: "240802", nombre: "IVA descontable", nivel: 5, naturaleza: "debito" },
+    // 2410 — Impuesto de renta y complementarios por pagar (pasivo corriente).
+    // Se causa al calcular el impuesto de renta estimado del período (35%).
+    { codigo: "2410", nombre: "Impuesto de renta y complementarios", nivel: 3, naturaleza: "credito" },
+    { codigo: "241005", nombre: "Impuesto de renta por pagar", nivel: 5, naturaleza: "credito" },
     { codigo: "2436", nombre: "ReteFuente", nivel: 3, naturaleza: "credito" },
     { codigo: "3", nombre: "Patrimonio", nivel: 1, naturaleza: "credito" },
     { codigo: "31", nombre: "Capital social", nivel: 2, naturaleza: "credito" },

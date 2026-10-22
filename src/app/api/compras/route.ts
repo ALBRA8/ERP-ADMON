@@ -11,6 +11,7 @@ import {
   parseBody,
 } from "@/lib/api";
 import { round } from "@/lib/currency";
+import { generarAsientoCompra } from "@/lib/contabilidad";
 
 // ============================================================
 // GET /api/compras
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
         total += totalItem;
 
         detallesData.push({
-          productoId: item.productoId,
+          productoId: item.productoId ?? undefined,
           descripcion: item.descripcion,
           cantidad: item.cantidad,
           unidadMedida: item.unidadMedida,
@@ -152,7 +153,7 @@ export async function POST(req: NextRequest) {
           tarifaIva: item.tarifaIva,
           iva,
           total: totalItem,
-          bodegaDestinoId: item.bodegaDestinoId ?? data.bodegaDestinoId,
+          bodegaDestinoId: (item.bodegaDestinoId ?? data.bodegaDestinoId) ?? undefined,
         });
       }
 
@@ -218,6 +219,20 @@ export async function POST(req: NextRequest) {
 
         return fac;
       });
+
+      // Generar asiento contable de causación de compra (DB 150505/240802, CR 220505/2365xx).
+      // Se ejecuta fuera de la transacción principal porque el helper usa el
+      // cliente global `db` (no recibe `tx`). El comprobante fiscal de compra
+      // ya quedó persistido; si el asiento falla, registramos el warning pero
+      // no invalidamos la operación principal (la compra ya existe).
+      try {
+        await generarAsientoCompra(factura.id, session.empresaId);
+      } catch (asientoErr) {
+        console.warn(
+          `[compras] Falló generarAsientoCompra para ${factura.numero} (${factura.id}):`,
+          asientoErr,
+        );
+      }
 
       return ok(factura);
     } catch (e) {

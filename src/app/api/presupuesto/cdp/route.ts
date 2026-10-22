@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
         estado: "vigente",
         saldo: d.valor,
       },
-      include: { rubro: true, tercero: true },
+      include: { rubro: true },
     });
 
     return ok(cdp);

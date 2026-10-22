@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       createdAt: b.createdAt,
       productosCount: b.saldosInventario.filter((s) => s.cantidad > 0).length,
       cantidadTotal: b.saldosInventario.reduce((a, s) => a + s.cantidad, 0),
-      valorTotal: b.saldosInventario.reduce((a, s) => a + s.costoTotal, 0),
+      valorTotal: b.saldosInventario.reduce((a, s) => a + Number(s.costoTotal), 0),
     }));
 
     return ok(enriched);

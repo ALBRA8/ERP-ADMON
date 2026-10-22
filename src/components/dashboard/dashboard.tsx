@@ -84,7 +84,7 @@ export function Dashboard() {
     {
       title: "Ventas del mes",
       value: formatCurrency(k.ventasMes),
-      sub: `${k.numFacturasMes} facturas`,
+      sub: k.numFacturasMes === 1 ? "1 factura" : `${k.numFacturasMes} facturas`,
       icon: TrendingUp,
       change: variacion,
       tone: "emerald" as const,

@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
         observaciones: d.observaciones ?? null,
         estado: "pendiente",
       },
-      include: { tercero: true },
+      include: { creditos: true },
     });
 
     return ok(solicitud);
@@ -189,7 +189,7 @@ export async function PUT(req: NextRequest) {
       return ok({
         solicitud: await db.solicitudCredito.findUnique({
           where: { id: solicitud.id },
-          include: { tercero: true, creditos: true },
+          include: { creditos: true },
         }),
         credito: withCuotas,
       });
@@ -199,7 +199,7 @@ export async function PUT(req: NextRequest) {
     const actualizada = await db.solicitudCredito.update({
       where: { id: solicitud.id },
       data,
-      include: { tercero: true, creditos: true },
+      include: { creditos: true },
     });
 
     return ok({ solicitud: actualizada, credito: null });
