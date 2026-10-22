@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "next-themes";
 import {
   Building2,
@@ -131,6 +131,19 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
   // Cuando se navega a una vista, abrir el grupo correspondiente automáticamente
   const activeGroup = NAV.find((n) => n.key === active)?.group ?? "Principal";
 
+  // Abrir el grupo activo automáticamente cuando cambia la vista activa
+  const prevActiveRef = useRef<string | null>(null);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    if (activeGroup && prevActiveRef.current !== activeGroup) {
+      prevActiveRef.current = activeGroup;
+      setExpandedGroups((prev) => ({
+        ...prev,
+        [activeGroup]: true,
+      }));
+    }
+  }, [activeGroup]);
+
   const grouped: Record<string, typeof NAV> = {};
   for (const n of NAV) {
     if (!grouped[n.group]) grouped[n.group] = [] as any;
@@ -166,7 +179,7 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {Object.entries(grouped).map(([group, items]) => {
-          const isExpanded = expandedGroups[group] || activeGroup === group;
+          const isExpanded = expandedGroups[group] === true;
           const isActiveInGroup = activeGroup === group;
 
           return (
