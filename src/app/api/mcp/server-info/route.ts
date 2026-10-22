@@ -3,8 +3,8 @@
 // Devuelve URI base, listado de resources/tools/prompts, token requerido
 // (solo si el usuario es admin), URLs de ejemplo para clientes externos.
 // ============================================================
-import { NextRequest } from "next/server";
-import { ok, serverError, unauthorized, forbidden } from "@/lib/api";
+import { NextRequest, NextResponse } from "next/server";
+import { ok, serverError, unauthorized } from "@/lib/api";
 import { getSession } from "@/lib/auth";
 import {
   MCP_RESOURCES_INFO,
@@ -100,6 +100,11 @@ await client.close();`;
 }
 
 // El endpoint no debe exponer el token a usuarios no-admin
+// FIX-DIAN-MENORES BUG-005: POST debe devolver 405 Method Not Allowed
+// (no 403 Forbidden, que indicaría permisos insuficientes).
 export async function POST() {
-  return forbidden("Usa GET");
+  return NextResponse.json(
+    { error: "Method Not Allowed. Usa GET." },
+    { status: 405 },
+  );
 }

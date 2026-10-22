@@ -6,9 +6,12 @@
 // ============================================================
 import { sha256 } from "@/lib/crypto";
 
-// ---------- Cálculo de CUFE (mock, algoritmo oficial) ----------
+// ---------- Cálculo de CUFE (algoritmo oficial Resolución DIAN 165/2023) ----------
 // CUFE = SHA384(NumFac + FecFac + HorFac + ValTotal + CodDoc + NitFac +
-//                TipAdq + NitPAC + ClTec + Soporte + 'M' o 'D' (ambiente))
+//                TipDocAdq + NumDocAdq + NitPAC + ClTec + Soporte + Ambiente)
+// - TipDocAdq: tipo de documento del adquirente (13=CC, 31=NIT, 22=CE, 12=TI, 41=Pasaporte)
+// - NumDocAdq: número de documento del adquirente
+// - Ambiente: "1"=producción, "0"=pruebas
 // Implementación completa en producción requiere certificado real.
 export interface CUFEInput {
   numFac: string; // número completo FEL-12345
@@ -17,7 +20,8 @@ export interface CUFEInput {
   valTotal: number;
   codDoc: string; // 01=Factura venta electrónica, 03=Nota crédito, 02=Nota débito
   nitFac: string; // NIT del facturador
-  tipAdq: string; // 1=Contribuyente, 2=No responsable
+  tipAdq: string; // TipoDocAdq: 13=CC, 31=NIT, 22=CE, 12=TI, 41=Pasaporte
+  numDocAdq: string; // Número de documento del adquirente (NIT/CC/CE)
   nitPac?: string; // NIT del proveedor tecnológico (vacío en mock)
   clTec?: string; // clave técnica de control (asignada por DIAN)
   soporte?: string; // URL PDF/DIAN
@@ -33,6 +37,7 @@ export function calcularCUFE(input: CUFEInput): string {
     input.codDoc,
     input.nitFac,
     input.tipAdq,
+    input.numDocAdq,
     input.nitPac ?? "",
     input.clTec ?? "",
     input.soporte ?? "",
@@ -48,12 +53,15 @@ export function generarUrlRepresentacionQR(params: {
   nit: string;
   ambiente: "pruebas" | "produccion";
 }): string {
-  // En producción real, sería algo como:
-  // https://catalogo-vpfefvph.dian.localgovworld.com:443/document/view?cufe=XXX&type=RAD&nita=NIT
+  // FIX-DIAN-MENORES BUG-003: usar URLs base diferentes por ambiente.
+  //   - Producción: catalogo-vpfefvph.dian.gov.co
+  //   - Pruebas (HAB): catalogo-vpfefvph-hab.dian.gov.co
+  // Antes ambos ambientes apuntaban a la misma URL, lo que hacía
+  // imposible distinguir documentos reales de pruebas desde el QR.
   const base =
     params.ambiente === "produccion"
-      ? "https://catalogo-vpfefvph.dian.localgovworld.com/document/view"
-      : "https://catalogo-vpfefvph.dian.localgovworld.com/document/view";
+      ? "https://catalogo-vpfefvph.dian.gov.co/Document/DownloadPDF"
+      : "https://catalogo-vpfefvph-hab.dian.gov.co/Document/DownloadPDF";
   return `${base}?cufe=${encodeURIComponent(
     params.cufe,
   )}&type=RAD&nita=${encodeURIComponent(params.nit)}&ambiente=${params.ambiente}`;
@@ -129,17 +137,38 @@ export function generarXMLUBL(factura: UBLFactura): string {
   const fmt = (n: number) =>
     n.toFixed(2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
 
+  // CRÍT-005: Un <cac:InvoiceLine> por cada item (UBL 2.1)
   const itemsXML = factura.items
     .map(
       (it, i) => `
-    <cbc:Description>${escXML(it.descripcion)}</cbc:Description>
-    <cbc:ID>${escXML(it.codigo)}</cbc:ID>
-    <cbc:InvoicedQuantity unitCode="${escXML(it.unidad)}">${fmt(it.cantidad)}</cbc:InvoicedQuantity>
-    <cbc:LineExtensionAmount currencyID="${escXML(factura.moneda)}">${fmt(it.subtotal)}</cbc:LineExtensionAmount>
-    <cbc:TaxAmount currencyID="${escXML(factura.moneda)}">${fmt(it.iva)}</cbc:TaxAmount>
-    <cbc:Percent>${fmt(it.tarifaIva)}</cbc:Percent>
-    <cbc:BaseUnitMeasure>${fmt(it.cantidad)}</cbc:BaseUnitMeasure>
-    <cbc:PriceAmount currencyID="${escXML(factura.moneda)}">${fmt(it.precioUnitario)}</cbc:PriceAmount>`,
+    <cac:InvoiceLine>
+      <cbc:ID>${i + 1}</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="${escXML(it.unidad)}">${fmt(it.cantidad)}</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${escXML(factura.moneda)}">${fmt(it.subtotal)}</cbc:LineExtensionAmount>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="${escXML(factura.moneda)}">${fmt(it.iva)}</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="${escXML(factura.moneda)}">${fmt(it.subtotal)}</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="${escXML(factura.moneda)}">${fmt(it.iva)}</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:Percent>${fmt(it.tarifaIva)}</cbc:Percent>
+            <cac:TaxScheme>
+              <cbc:ID>01</cbc:ID>
+              <cbc:Name>IVA</cbc:Name>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:Item>
+        <cbc:Description>${escXML(it.descripcion)}</cbc:Description>
+        <cac:SellersItemIdentification>
+          <cbc:ID>${escXML(it.codigo)}</cbc:ID>
+        </cac:SellersItemIdentification>
+      </cac:Item>
+      <cac:Price>
+        <cbc:PriceAmount currencyID="${escXML(factura.moneda)}">${fmt(it.precioUnitario)}</cbc:PriceAmount>
+      </cac:Price>
+    </cac:InvoiceLine>`,
     )
     .join("\n");
 
@@ -175,7 +204,7 @@ export function generarXMLUBL(factura: UBLFactura): string {
       </cac:PartyName>
     </cac:Party>
   </cac:AccountingCustomerParty>
-  <cac:InvoiceLine>${itemsXML}</cac:InvoiceLine>
+${itemsXML}
   <cac:LegalMonetaryTotal>
     <cbc:LineExtensionAmount currencyID="${escXML(factura.moneda)}">${fmt(factura.subtotalNeto)}</cbc:LineExtensionAmount>
     <cbc:AllowanceTotalAmount currencyID="${escXML(factura.moneda)}">${fmt(factura.descuentoTotal)}</cbc:AllowanceTotalAmount>

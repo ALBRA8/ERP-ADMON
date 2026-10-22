@@ -62,17 +62,25 @@ export async function generarAsientoCompra(
 
   // Distribución del crédito: proveedores recibe (total - retenciones).
   // Por defecto, sin retenciones registradas en la factura, el pasivo = total.
-  const baseGravable = round(compra.subtotal - compra.descuentoTotal, 2);
-  const retenciones = Math.max(0, compra.totalRetenciones ?? 0);
-  const pasivoProveedores = round(compra.total - retenciones, 2);
+  // Los campos monetarios de FacturaCompra son Decimal en Prisma → convertir a number
+  // antes de operar (los operadores aritméticos no están definidos para Decimal).
+  const subtotal = Number(compra.subtotal);
+  const descuentoTotal = Number(compra.descuentoTotal);
+  const totalIva = Number(compra.totalIva);
+  const totalRetenciones = Number(compra.totalRetenciones ?? 0);
+  const total = Number(compra.total);
+
+  const baseGravable = round(subtotal - descuentoTotal, 2);
+  const retenciones = Math.max(0, totalRetenciones);
+  const pasivoProveedores = round(total - retenciones, 2);
 
   const debitos: { codigo: string; valor: number; descripcion: string }[] = [
     { codigo: "150505", valor: baseGravable, descripcion: `Inventario — compra ${compra.numero}` },
   ];
-  if (compra.totalIva > 0) {
+  if (totalIva > 0) {
     debitos.push({
       codigo: "240802",
-      valor: compra.totalIva,
+      valor: totalIva,
       descripcion: `IVA descontable — compra ${compra.numero}`,
     });
   }
@@ -195,8 +203,9 @@ export async function generarAsientoReciboCaja(
     return null;
   }
 
-  const totalDebito = round(recibo.valorTotal, 2);
-  const totalCredito = round(recibo.valorTotal, 2);
+  const valorTotal = Number(recibo.valorTotal);
+  const totalDebito = round(valorTotal, 2);
+  const totalCredito = round(valorTotal, 2);
 
   const comprobante = await db.comprobante.create({
     data: {
@@ -271,8 +280,9 @@ export async function generarAsientoEgreso(
     return null;
   }
 
-  const totalDebito = round(egreso.valorTotal, 2);
-  const totalCredito = round(egreso.valorTotal, 2);
+  const valorTotal = Number(egreso.valorTotal);
+  const totalDebito = round(valorTotal, 2);
+  const totalCredito = round(valorTotal, 2);
 
   const comprobante = await db.comprobante.create({
     data: {

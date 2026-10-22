@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { generarPDFNomina } from "@/lib/pdf";
@@ -23,7 +23,8 @@ export async function GET(
     where: { id, empresaId: session.empresaId },
     select: { id: true },
   });
-  if (!existe) return new Response("Not found", { status: 404 });
+  if (!existe)
+    return NextResponse.json({ error: "No encontrado" }, { status: 404 });
 
   try {
     const pdfBuffer = await generarPDFNomina(id, session.empresaId);

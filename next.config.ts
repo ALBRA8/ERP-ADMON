@@ -50,6 +50,8 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   reactStrictMode: false,
+  // Desactiva el indicador de Next.js DevTools (la "N" que estorba en el sidebar)
+  devIndicators: false,
   async headers() {
     return [
       {

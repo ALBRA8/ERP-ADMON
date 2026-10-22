@@ -70,6 +70,19 @@ export async function PUT(req: NextRequest) {
     const csrfDenied = await requireCsrf(req);
     if (csrfDenied) return csrfDenied;
 
+    // FIX-DIAN-MENORES BUG-001: validar Content-Type antes de llamar
+    // req.formData(). Si el cliente envía JSON, formData() lanza TypeError
+    // y el handler devuelve 500. Devolvemos 400 con un mensaje claro.
+    const contentType = req.headers.get("content-type") || "";
+    if (
+      !contentType.includes("multipart/form-data") &&
+      !contentType.includes("application/x-www-form-urlencoded")
+    ) {
+      return badRequest(
+        "Content-Type debe ser multipart/form-data para subir certificados. Usa FormData, no JSON.",
+      );
+    }
+
     const form = await req.formData();
     const ambiente = (form.get("ambiente") as string) || "pruebas";
     if (!["pruebas", "produccion"].includes(ambiente)) {

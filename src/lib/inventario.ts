@@ -53,13 +53,18 @@ export async function registrarMovimientoInventario(input: MovimientoInvInput) {
   });
 
   if (saldo) {
+    // Convertir campos Decimal de Prisma a number antes de operar.
+    // (saldo.cantidad es Float → number; costoTotal y costoPromedio son Decimal.)
+    const costoPromedioActual = Number(saldo.costoPromedio);
+    const costoTotalActual = Number(saldo.costoTotal);
+
     const nuevaCantidad = round(saldo.cantidad + cantidad, 4);
-    let nuevoCostoPromedio = saldo.costoPromedio;
-    let nuevoCostoTotal = round(saldo.costoTotal + costoTotal, 2);
+    let nuevoCostoPromedio: number = costoPromedioActual;
+    let nuevoCostoTotal: number = round(costoTotalActual + costoTotal, 2);
 
     if (cantidad > 0) {
       // Entrada: recalcular promedio ponderado
-      const prevTotal = round(saldo.cantidad * saldo.costoPromedio, 2);
+      const prevTotal = round(saldo.cantidad * costoPromedioActual, 2);
       const entryTotal = round(cantidad * input.costoUnitario, 2);
       if (nuevaCantidad > 0) {
         nuevoCostoPromedio = round(
@@ -73,7 +78,7 @@ export async function registrarMovimientoInventario(input: MovimientoInvInput) {
       }
     } else {
       // Salida: mantener costo promedio actual, reducir total
-      nuevoCostoTotal = round(nuevaCantidad * saldo.costoPromedio, 2);
+      nuevoCostoTotal = round(nuevaCantidad * costoPromedioActual, 2);
     }
 
     await db.saldoInventario.update({
@@ -149,7 +154,7 @@ export async function getKardex(
   let costoAcumulado = 0;
   return movs.map((m) => {
     saldo = round(saldo + m.cantidad, 4);
-    costoAcumulado = round(costoAcumulado + m.costoTotal, 2);
+    costoAcumulado = round(costoAcumulado + Number(m.costoTotal), 2);
     return {
       ...m,
       saldoCantidad: saldo,

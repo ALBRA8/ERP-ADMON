@@ -15,6 +15,7 @@ import {
   calcularCUFE,
   generarUrlRepresentacionQR,
   generarXMLUBL,
+  resolucionVigente,
 } from "@/lib/dian";
 import { enviarFacturaADian, loadDIANConfigFromDB } from "@/lib/dian-real";
 import { round } from "@/lib/currency";
@@ -99,14 +100,31 @@ export async function POST(req: NextRequest) {
     const data = parsed.data;
 
     try {
-      // 0. Validar FK terceroId (A-CRIT-007 robustez)
+      // 0. Validar FK terceroId (A-CRIT-007 robustez) + lookup para tipAdq
+      // dinámico (CRÍT-007).
+      let tercero: { id: string; tipoDocumento: string } | null = null;
       if (data.terceroId) {
-        const cli = await db.tercero.findFirst({
+        tercero = await db.tercero.findFirst({
           where: { id: data.terceroId, empresaId: session.empresaId },
-          select: { id: true },
+          select: { id: true, tipoDocumento: true },
         });
-        if (!cli) return badRequest("Tercero (cliente) no encontrado en su empresa");
+        if (!tercero)
+          return badRequest("Tercero (cliente) no encontrado en su empresa");
       }
+      // CRÍT-007: TipoDocAdq DIAN (13=CC, 31=NIT, 22=CE, 12=TI, 41=PT)
+      // derivado del tipo de documento del tercero receptor.
+      const tipoDocAdq =
+        tercero?.tipoDocumento === "NIT"
+          ? "31"
+          : tercero?.tipoDocumento === "CC"
+            ? "13"
+            : tercero?.tipoDocumento === "CE"
+              ? "22"
+              : tercero?.tipoDocumento === "TI"
+                ? "12"
+                : tercero?.tipoDocumento === "PT"
+                  ? "41"
+                  : "13";
 
       // 1. Validaciones previas (lecturas fuera de la tx para no
       //    bloquear innecesariamente, pero son read-only).
@@ -118,10 +136,12 @@ export async function POST(req: NextRequest) {
         },
         orderBy: { createdAt: "desc" },
       });
-      if (!resolucion) {
+      // CRÍT-006: Validar también vigencia de fechas, no solo `activa`.
+      if (!resolucion || !resolucionVigente(resolucion)) {
         return badRequest(
-          "No hay resolución DIAN activa para facturación " +
-            (data.esPOS ? "POS" : "estándar"),
+          "No hay resolución DIAN vigente para facturación " +
+            (data.esPOS ? "POS" : "estándar") +
+            " (verifique rango de fechas y estado activo)",
         );
       }
       if (resolucion.consecutivoSiguiente > resolucion.rangoFin) {
@@ -195,8 +215,12 @@ export async function POST(req: NextRequest) {
         subtotalBruto += gross;
         descuentoTotal += descuento;
         totalIva += iva;
+        // CRÍT-003: el schema Zod es `.nullish()` → `string | null | undefined`.
+        // detallesData espera `string | undefined`, así que coercionamos null
+        // a undefined. El posterior `if (d.productoId && d.bodegaId)` ya
+        // estrecha correctamente a `string` para la llamada a inventario.
         detallesData.push({
-          productoId: item.productoId,
+          productoId: item.productoId ?? undefined,
           descripcion: item.descripcion,
           cantidad: item.cantidad,
           unidadMedida: item.unidadMedida,
@@ -208,7 +232,7 @@ export async function POST(req: NextRequest) {
           iva,
           total,
           costoUnitario,
-          bodegaId: item.bodegaId,
+          bodegaId: item.bodegaId ?? undefined,
         });
       }
 
@@ -219,8 +243,10 @@ export async function POST(req: NextRequest) {
       const consecutivo = resolucion.consecutivoSiguiente;
       const numero = `${resolucion.prefijo}-${String(consecutivo).padStart(6, "0")}`;
       const fecha = new Date();
-      const fechaStr = fecha.toISOString().slice(0, 10);
-      const horaStr = fecha.toISOString().slice(11, 19);
+      // Fix adicional: CUFE debe usar hora Colombia (UTC-5), no UTC.
+      const fechaCol = new Date(fecha.getTime() - 5 * 60 * 60 * 1000);
+      const fechaStr = fechaCol.toISOString().slice(0, 10);
+      const horaStr = fechaCol.toISOString().slice(11, 19);
 
       const cufe = calcularCUFE({
         numFac: numero,
@@ -229,13 +255,16 @@ export async function POST(req: NextRequest) {
         valTotal: total,
         codDoc: "01",
         nitFac: empresa.nit,
-        tipAdq: "1",
-        ambiente: resolucion.ambiente,
+        // CRÍT-004 + CRÍT-007: TipoDocAdq + NumDocAdq del adquirente.
+        tipAdq: tipoDocAdq,
+        numDocAdq: data.nitCliente,
+        // CRÍT-002: cast string → union "pruebas" | "produccion".
+        ambiente: resolucion.ambiente as "pruebas" | "produccion",
       });
       const qrUrl = generarUrlRepresentacionQR({
         cufe,
         nit: empresa.nit,
-        ambiente: resolucion.ambiente,
+        ambiente: resolucion.ambiente as "pruebas" | "produccion",
       });
 
       // 4. Saldo pendiente (cartera)
@@ -268,7 +297,9 @@ export async function POST(req: NextRequest) {
           responsableIVA: empresa.responsabilidad === "iva",
         },
         receptor: {
-          tipoDocumento: "31",
+          // Usar tipoDocAdq dinámico (13/31/22/...) en lugar de
+          // hardcoded "31" (consistencia con CUFE).
+          tipoDocumento: tipoDocAdq,
           numeroDocumento: data.nitCliente,
           nombre: data.nombreCliente,
         },
@@ -542,6 +573,10 @@ async function generarAsientoVentaTx(
   const subtotalNeto = Number(factura.subtotalNeto);
   const totalIva = Number(factura.totalIva);
 
+  // CRÍT-008: El comprobante se crea con totales placeholder (0) y se
+  // actualiza al final con la suma real de TODOS los movimientos,
+  // incluyendo costo de venta. Antes se seteaba totalDebito/totalCredito
+  // = `total` (que no incluye costo), dejando el comprobante desbalanceado.
   const comprobante = await tx.comprobante.create({
     data: {
       empresaId,
@@ -549,8 +584,8 @@ async function generarAsientoVentaTx(
       tipo: "facturacion",
       fecha: factura.fecha,
       descripcion: `Factura de venta ${factura.numero}`,
-      totalDebito: total,
-      totalCredito: total,
+      totalDebito: 0,
+      totalCredito: 0,
       diferencia: 0,
       estado: "contabilizado",
       documentoOrigenId: factura.id,
@@ -613,10 +648,13 @@ async function generarAsientoVentaTx(
   }
   if (costoTotalVenta > 0 && cuentaCosto && cuentaInventario) {
     const costo = round(costoTotalVenta, 2);
+    // CRÍT-001: los movimientos de costo de venta también requieren
+    // `terceroId` (no es opcional en el tipo del array `movs`).
     movs.push({
       empresaId,
       comprobanteId: comprobante.id,
       cuentaId: cuentaCosto.id,
+      terceroId: factura.terceroId ?? null,
       descripcion: `Costo de mercancías ${factura.numero}`,
       debito: costo,
       credito: 0,
@@ -626,6 +664,7 @@ async function generarAsientoVentaTx(
       empresaId,
       comprobanteId: comprobante.id,
       cuentaId: cuentaInventario.id,
+      terceroId: factura.terceroId ?? null,
       descripcion: `Salida de inventario ${factura.numero}`,
       debito: 0,
       credito: costo,
@@ -636,4 +675,21 @@ async function generarAsientoVentaTx(
   if (movs.length > 0) {
     await tx.movimientoContable.createMany({ data: movs });
   }
+
+  // CRÍT-008: Recalcular totales del comprobante con TODOS los
+  // movimientos (incluyendo costo de venta) para que cuadre.
+  const todosMovs = await tx.movimientoContable.findMany({
+    where: { comprobanteId: comprobante.id },
+    select: { debito: true, credito: true },
+  });
+  const totalDeb = todosMovs.reduce((a, m) => a + Number(m.debito), 0);
+  const totalCre = todosMovs.reduce((a, m) => a + Number(m.credito), 0);
+  await tx.comprobante.update({
+    where: { id: comprobante.id },
+    data: {
+      totalDebito: round(totalDeb, 2),
+      totalCredito: round(totalCre, 2),
+      diferencia: round(totalDeb - totalCre, 2),
+    },
+  });
 }
