@@ -121,7 +121,7 @@
   }
 }
 
-/* Ocultar SOLO el badge flotante "N" de Next.js DevTools */
-nextjs-dev-tools-button {
+/* Ocultar el badge "N" de Next.js DevTools (está dentro de NEXTJS-PORTAL shadow DOM) */
+nextjs-portal {
   display: none !important;
 }

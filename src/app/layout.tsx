@@ -1,18 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
-import { RegisterSW } from "@/components/pwa/register-sw";
 
 export const metadata: Metadata = {
   title: "Marsella ERP — Software Contable Administrativo",
   description:
     "ERP contable-administrativo para Colombia. Facturación electrónica DIAN, inventarios, cartera, contabilidad NIIF.",
-  manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Marsella POS",
-  },
 };
 
 export const viewport: Viewport = {
@@ -22,6 +15,20 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
+// Script para eliminar el badge "N" de Next.js DevTools
+const devToolsKiller = `
+(function() {
+  var remove = function() {
+    var p = document.querySelector('nextjs-portal');
+    if (p) p.remove();
+  };
+  setTimeout(remove, 100);
+  setTimeout(remove, 500);
+  setTimeout(remove, 1500);
+  setTimeout(remove, 3000);
+})();
+`;
+
 export default function RootLayout({
   children,
 }: {
@@ -30,13 +37,8 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
-        <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#10b981" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="Marsella POS" />
         <link rel="icon" type="image/svg+xml" href="/icon-192.svg" />
-        <link rel="apple-touch-icon" href="/icon-192.svg" />
+        <style dangerouslySetInnerHTML={{ __html: "nextjs-portal{display:none!important;}" }} />
       </head>
       <body className="antialiased">
         <ThemeProvider
@@ -46,7 +48,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
-          <RegisterSW />
+          <script dangerouslySetInnerHTML={{ __html: devToolsKiller }} />
         </ThemeProvider>
       </body>
     </html>
