@@ -19,6 +19,7 @@ import {
   Plug,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Moon,
   Sun,
   UserCog,
@@ -117,11 +118,28 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
   const { theme, setTheme } = useTheme();
   const { pendingCount } = useOfflinePos();
 
+  // Estado de grupos colapsables: por defecto "Principal" abierto, resto cerrado
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    Principal: true,
+    Catálogos: false,
+    Operación: false,
+    Financiero: false,
+    Verticales: false,
+    Sistema: false,
+  });
+
+  // Cuando se navega a una vista, abrir el grupo correspondiente automáticamente
+  const activeGroup = NAV.find((n) => n.key === active)?.group ?? "Principal";
+
   const grouped: Record<string, typeof NAV> = {};
   for (const n of NAV) {
     if (!grouped[n.group]) grouped[n.group] = [] as any;
     grouped[n.group].push(n);
   }
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [group]: !prev[group] }));
+  };
 
   return (
     <aside
@@ -146,16 +164,79 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto p-2 space-y-3">
-        {Object.entries(grouped).map(([group, items]) => (
-          <div key={group}>
-            {!collapsed && (
-              <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-neutral-400">
-                {group}
-              </div>
-            )}
-            <div className="space-y-0.5">
-              {items.map((item) => {
+      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+        {Object.entries(grouped).map(([group, items]) => {
+          const isExpanded = expandedGroups[group] || activeGroup === group;
+          const isActiveInGroup = activeGroup === group;
+
+          return (
+            <div key={group}>
+              {/* Header del grupo — clickeable para desplegar/colapsar */}
+              <button
+                onClick={() => !collapsed && toggleGroup(group)}
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors",
+                  "text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800",
+                  "font-semibold uppercase tracking-wide text-[11px]",
+                  isActiveInGroup && "text-emerald-600 dark:text-emerald-400",
+                  collapsed && "justify-center",
+                )}
+                title={collapsed ? group : undefined}
+              >
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 text-left">{group}</span>
+                    <ChevronDown
+                      className={cn(
+                        "w-3.5 h-3.5 transition-transform duration-200",
+                        isExpanded ? "rotate-0" : "-rotate-90",
+                      )}
+                    />
+                  </>
+                )}
+                {collapsed && (
+                  <span className="w-1 h-4 rounded-full bg-neutral-300 dark:bg-neutral-700" />
+                )}
+              </button>
+
+              {/* Items del grupo — desplegables */}
+              {!collapsed && isExpanded && (
+                <div className="space-y-0.5 mt-0.5 ml-3 border-l border-neutral-200 dark:border-neutral-800 pl-2">
+                  {items.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = active === item.key;
+                    const showPendingBadge = item.key === "facturas" && pendingCount > 0;
+                    return (
+                      <button
+                        key={item.key}
+                        onClick={() => onNavigate(item.key)}
+                        title={item.label}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors",
+                          isActive
+                            ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 font-medium"
+                            : "text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800",
+                        )}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="truncate flex-1 text-left">{item.label}</span>
+                        {showPendingBadge && (
+                          <Badge
+                            variant="outline"
+                            className="ml-auto border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] px-1.5 py-0 h-5 min-w-[20px] justify-center"
+                            title={`${pendingCount} factura(s) pendiente(s) de sincronización`}
+                          >
+                            {pendingCount}
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Cuando está colapsado el sidebar, mostrar solo iconos sin grupos */}
+              {collapsed && items.map((item) => {
                 const Icon = item.icon;
                 const isActive = active === item.key;
                 const showPendingBadge = item.key === "facturas" && pendingCount > 0;
@@ -165,33 +246,22 @@ export function Sidebar({ active, onNavigate, empresa }: SidebarProps) {
                     onClick={() => onNavigate(item.key)}
                     title={item.label}
                     className={cn(
-                      "w-full flex items-center gap-2 px-2 py-2 rounded-md text-sm transition-colors",
+                      "w-full flex items-center justify-center px-2 py-2 rounded-md text-sm transition-colors relative",
                       isActive
                         ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 font-medium"
                         : "text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800",
-                      collapsed && "justify-center relative",
                     )}
                   >
                     <Icon className="w-4 h-4 shrink-0" />
-                    {!collapsed && <span className="truncate flex-1 text-left">{item.label}</span>}
-                    {showPendingBadge && !collapsed && (
-                      <Badge
-                        variant="outline"
-                        className="ml-auto border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] px-1.5 py-0 h-5 min-w-[20px] justify-center"
-                        title={`${pendingCount} factura(s) pendiente(s) de sincronización`}
-                      >
-                        {pendingCount}
-                      </Badge>
-                    )}
-                    {showPendingBadge && collapsed && (
+                    {showPendingBadge && (
                       <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500" />
                     )}
                   </button>
                 );
               })}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Footer */}
